@@ -67,7 +67,16 @@ class Planet extends SystemObject
 
         public function tick (float $deltaTime = 1.0) : void
         {
-                if (($this->orbit !== null) && ($deltaTime > 0))
+                $useAnalyticOrbit = ($this->orbit !== null) && ($deltaTime > 0);
+                if ($useAnalyticOrbit)
+                {
+                        $system = $this->getParentSystem();
+                        if ($system instanceof System)
+                        {
+                                $useAnalyticOrbit = ($system->getPropagationMode() === System::PROPAGATION_ANALYTIC);
+                        }
+                }
+                if ($useAnalyticOrbit)
                 {
                         $this->updateOrbit($deltaTime);
                         $this->age += $deltaTime;

@@ -117,6 +117,22 @@ class SystemObject
                 );
         }
 
+        public function getMomentumVector () : array
+        {
+                return array(
+                        'x' => $this->mass * $this->velocity['x'],
+                        'y' => $this->mass * $this->velocity['y'],
+                        'z' => $this->mass * $this->velocity['z']
+                );
+        }
+
+        public function getKineticEnergy () : float
+        {
+                if ($this->mass <= 0) return 0.0;
+                $speed = $this->getSpeed();
+                return 0.5 * $this->mass * $speed * $speed;
+        }
+
         public function applyAcceleration (array $acceleration, float $deltaTime) : void
         {
                 if ($deltaTime <= 0) return;
