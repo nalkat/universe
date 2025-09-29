@@ -1,0 +1,8 @@
+*.bak
+*.log
+*.old
+*.orig
+.*.swp
+destruct.php
+test.php
+*.txt

@@ -1,0 +1,9 @@
+.git/
+class_db.php.old
+class_db-static.php
+pgsql.php
+sqlite3.php
+t2.php
+t.php
+class_db_vision.php
+*.txt

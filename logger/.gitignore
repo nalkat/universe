@@ -1,0 +1,9 @@
+backup
+CHANGELOG-latest
+class_logger2.php
+class_logger-static.php
+class_log.php
+logger
+test_class_logger.php
+test_static.php
+*.txt

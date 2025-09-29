@@ -1,0 +1,25 @@
+MODIFICATIONS (6/10/2018):
+  - Created an interface definition in $ENV_PHPROOT/interfaces called 'db' (interfaces/interface_db.php) which defines the basic public methods for accessing databases
+  - Created pgsql.php which implements the new interface for PostgreSQL databases
+  - Created sq3.php which implements the new interface for SQLite3 databases
+
+MODIFICATIONS (6/25/2018):
+  - Created a static version of the db class and saved it as class_db-static.php
+  - Usage is roughly the same.  instead of "$var = new db()", now it is: 
+	db::init()
+	db::$sqlstr = "sql statement";
+	db::query();
+	db::row() or db::result('field');
+  - init takes the same arguments as the constructor in the object version
+  - Using this method should alleviate the disconnects due to the loss of scope and will not require reinstantiation when used by other objects.
+
+MODIFICATIONS (11/16/2018):
+  - Found out that PHP really does not support returning values from a constructor method. This being the case, it is possible to "throw" and exception which is then
+    able to be caught by a "try-catch" block. As such, I have converted the various conditional returns into thrown exceptions. Performing the following code now replaces
+    the never-working "if (($db = new db()) === false)" condition:
+    	try {
+    	  $db = new db();
+    	} catch (Exception $dbException) {
+    	  return false;
+    	}
+

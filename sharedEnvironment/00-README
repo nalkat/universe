@@ -1,0 +1,29 @@
+
+class_sharedEnvironment:
+-- needs to be rewritten to use data stored in the $ENV_PGDATA
+================================================================
+$se = new SharedEnvironment() or ("/root-of-shared-env");
+
+public methods:
+$se->cleanExit($code)				// clean up and destroy object
+$se->du("/directory")				// directory usage of <directory>
+$se->cSystemLogs(["/directory"][,"nodes"])	// compress system logs
+$se->setNodeList("/path/to/node.lst")		// set's a node list to use with onHost
+
+
+class_onHost:
+=================================================================
+$oh = new OnHost ("/path/to/host.lst","command" [,"onlyNodes" [,"bool parallel" [,"/path/to/identityFile"]]])
+
+public methods:
+$oh->cleanExit($code)				// clean up and destroy object
+$oh->determineNodeWeight("$node")		// determine optimal timeout value for node
+$oh->weighAll()					// determine optimal timeout values for alive queries
+$oh->setWeight("$node",$weight)			// set timeout for alive queries
+$oh->isAlive("$node")				// check a node for availability
+$oh->getNodeAddress("$node")			// return the address of a given node
+$oh->showNodes([bool $detail])			// show the node ids and optionally their properties
+$oh->health()					// show if the nodes in the list are responsive to queries
+$oh->setUserName("$userName")			// set the username to use for executing commands
+
+
