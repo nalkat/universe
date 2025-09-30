@@ -70,6 +70,7 @@ class Universe
 		self::$movement_direction = array ('x' => floatval(0), 'y' => floatval(0), 'z' => floatval(0));
 		self::$numGalaxies = 0;
 		self::$numObjects = 0;
+		self::$objectList = array();
 		self::$age = floatval(0);
 		self::$last_location = array('x' => floatval(0), 'y' => floatval(0), 'z' => floatval(0));
 		self::$current_location = array('x' => floatval(0), 'y' => floatval(0), 'z' => floatval(0));
@@ -612,50 +613,90 @@ class Universe
 		return $this->empty_space;
 	}
 
-	public function createGalaxy (string $name, float $x = null, float $y = null, float $z = null) : bool
-	{
-		// set upper bounds of galaxy's x-plane (if it doesn't exceed boundaries)
-		if ($x === null)
-		{
-			$x = floatval(random_int(1,$this->empty_space['x']));
-		}
-		if ($y === null)
-		{
-			$y = floatval(random_int(1,$this->empty_space['y']));
-		}
-		if ($z === null)
-		{
-			$z = floatval(random_int(1,$this->empty_space['z']));
-		}
-		foreach ($this->galaxies as $galaxy)
-		{
-			if (!is_a($galaxy,"Galaxy")) continue;
-			if ($galaxy->name === $name)
-			{
-				Utility::write ("Galaxy $name already exists, aborting", LOG_WARNING, L_CONSOLE);
-				return false;
-			}	
-		}
-		// set the name
-		$this->galaxies[$name] = new Galaxy($name);
-		// add to the static object list
-		self::$objectList[] =& $this->galaxies[$name];
-		// increment the galaxy count
-		self::$numGalaxies++;
-		// adjust the space-trackers
-		$this->galaxies[$name]->setMaxX ($x);
-		self::$current_x += $x;
-		$this->empty_space['x'] -= $x;
-		$this->galaxies[$name]->setMaxY ($y);
-		self::$current_y += $y;
-		$this->empty_space['y'] -= $y;
-		$this->galaxies[$name]->setMaxZ ($z);
-		self::$current_z += $z;
-		$this->empty_space['z'] -= $z;
-		return true;
-	}
+	
+        public function registerGalaxy (Galaxy $galaxy) : void
+        {
+                $name = $galaxy->name;
+                $this->galaxies[$name] =& $galaxy;
+                $found = false;
+                foreach (self::$objectList as $index => $object)
+                {
+                        if (($object instanceof Galaxy) && ($object->name === $name))
+                        {
+                                self::$objectList[$index] =& $this->galaxies[$name];
+                                $found = true;
+                                break;
+                        }
+                }
+                if ($found === false)
+                {
+                        self::$objectList[] =& $this->galaxies[$name];
+                }
+                self::$numGalaxies = count($this->galaxies);
+        }
 
-	public function galaxyList () : void
+        public function getGalaxies () : array
+        {
+                return $this->galaxies;
+        }
+
+        public function getGalaxy (string $name) : ?Galaxy
+        {
+                $cleanName = Utility::cleanse_string($name);
+                if (!isset($this->galaxies[$cleanName])) return null;
+                return $this->galaxies[$cleanName];
+        }
+
+        public function advance (float $deltaTime = 1.0) : void
+        {
+                $this->tick();
+                foreach ($this->galaxies as $galaxy)
+                {
+                        if ($galaxy instanceof Galaxy)
+                        {
+                                $galaxy->tick($deltaTime);
+                        }
+                }
+        }
+
+        public function createGalaxy (string $name, float $x = null, float $y = null, float $z = null) : bool
+        {
+                if ($x === null)
+                {
+                        $x = floatval(random_int(1, $this->empty_space['x']));
+                }
+                if ($y === null)
+                {
+                        $y = floatval(random_int(1, $this->empty_space['y']));
+                }
+                if ($z === null)
+                {
+                        $z = floatval(random_int(1, $this->empty_space['z']));
+                }
+                foreach ($this->galaxies as $galaxy)
+                {
+                        if (!is_a($galaxy, 'Galaxy')) continue;
+                        if ($galaxy->name === $name)
+                        {
+                                Utility::write("Galaxy $name already exists, aborting", LOG_WARNING, L_CONSOLE);
+                                return false;
+                        }
+                }
+                $galaxy = new Galaxy($name);
+                $this->registerGalaxy($galaxy);
+                $galaxy->setMaxX($x);
+                self::$current_x += $x;
+                $this->empty_space['x'] -= $x;
+                $galaxy->setMaxY($y);
+                self::$current_y += $y;
+                $this->empty_space['y'] -= $y;
+                $galaxy->setMaxZ($z);
+                self::$current_z += $z;
+                $this->empty_space['z'] -= $z;
+                return true;
+        }
+
+        public function galaxyList () : void
 	{
 		foreach ($this->galaxies as $idx => $galaxy) {
 			if (empty($galaxy)) continue;

@@ -5,7 +5,7 @@
 // @REQ:pcre
 // @REQ:fileinfo
 // @REQ:EnVision 
-require_once __DIR__ . "/EnVision/class_envision.php";
+require_once __DIR__ . '/../EnVision/class_envision.php';
 
 // if these values are not defined elsewhere, define them here
 if (!defined("L_NULL"))    define ("L_NULL", 0x0);
