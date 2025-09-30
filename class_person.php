@@ -160,6 +160,7 @@ class Person extends Life
         public function getHungerLevel () : float
         {
                 return $this->hunger;
+                return $this->skills;
         }
 
         public function tick (float $deltaTime = 1.0) : void

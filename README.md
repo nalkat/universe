@@ -1,4 +1,4 @@
-This program is a simulater for the universe and an experiment in object spawning.
+This program is a simulator for the universe and an experiment in object spawning.
 The purpose of this appliation is to create objects which create and run other objects
 which in turn create other objects, and so on and so forth. This will allow for a great
 many different types of things possible, from simulating clients for load testing, for
@@ -22,10 +22,15 @@ the console, including the new interactive shell mode.
 ```
 php tools/universe_console.php status
 php tools/universe_console.php snapshot
+<<<<<<< HEAD
 php tools/universe_console.php hierarchy --depth=4
 php tools/universe_console.php advance --steps=5 --delta=1800
 php tools/universe_console.php shutdown
 php tools/universe_console.php repl           # stay connected and run multiple commands
+=======
+php tools/universe_console.php advance --steps=5 --delta=1800
+php tools/universe_console.php shutdown
+>>>>>>> main
 ```
 
 Pass `--no-daemonize` to `universe.php start` to run the service in the foreground (useful
