@@ -1,9 +1,21 @@
 <?php // 7.3.0
 // file locations
-define ("LOGROOT","{$_SERVER['ENV_LOGROOT']}/{$_SERVER['ENV_MYIP']}/hostDaemon");
-define ("RUNROOT","{$_SERVER['ENV_RUNROOT']}/{$_SERVER['ENV_MYIP']}/hostDaemon");
-define ("TMPROOT","{$_SERVER['ENV_TMPROOT']}/{$_SERVER['ENV_MYIP']}/hostDaemon");
-define ("PHPROOT","{$_SERVER['ENV_PHPROOT']}");
+$envLogRoot = $_SERVER['ENV_LOGROOT'] ?? getenv('ENV_LOGROOT') ?? (__DIR__ . '/../runtime/logs');
+$envRunRoot = $_SERVER['ENV_RUNROOT'] ?? getenv('ENV_RUNROOT') ?? (__DIR__ . '/../runtime/run');
+$envTmpRoot = $_SERVER['ENV_TMPROOT'] ?? getenv('ENV_TMPROOT') ?? (__DIR__ . '/../runtime/tmp');
+$envPhpRoot = $_SERVER['ENV_PHPROOT'] ?? getenv('ENV_PHPROOT') ?? dirname(__DIR__);
+$envHostId = $_SERVER['ENV_MYIP'] ?? getenv('ENV_MYIP') ?? 'local';
+
+define ("LOGROOT", rtrim($envLogRoot, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . $envHostId . DIRECTORY_SEPARATOR . 'hostDaemon');
+define ("RUNROOT", rtrim($envRunRoot, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . $envHostId . DIRECTORY_SEPARATOR . 'hostDaemon');
+define ("TMPROOT", rtrim($envTmpRoot, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . $envHostId . DIRECTORY_SEPARATOR . 'hostDaemon');
+if (!defined("PHPROOT")) {
+        $normalisedRoot = rtrim($envPhpRoot, DIRECTORY_SEPARATOR);
+        if ($normalisedRoot === '') {
+                $normalisedRoot = realpath(dirname(__DIR__)) ?: dirname(__DIR__);
+        }
+        define ("PHPROOT", $normalisedRoot);
+}
 
 define ("SIGNAL_DAEMON",0x0);
 define ("SIGNAL_PARENT",0x1);
