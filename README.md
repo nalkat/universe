@@ -16,13 +16,15 @@ php universe.php start --delta=3600 --interval=1 --auto-steps=1
 
 The daemon listens on a UNIX socket located at `runtime/universe.sock` by default. Use
 the console client to query status, fetch snapshots, advance the simulation, or issue a
-shutdown.
+shutdown. See [docs/UNIVERSE_CONSOLE.md](docs/UNIVERSE_CONSOLE.md) for a deeper tour of
+the console, including the new interactive shell mode.
 
 ```
 php tools/universe_console.php status
 php tools/universe_console.php snapshot
 php tools/universe_console.php advance --steps=5 --delta=1800
 php tools/universe_console.php shutdown
+php tools/universe_console.php repl           # stay connected and run multiple commands
 ```
 
 Pass `--no-daemonize` to `universe.php start` to run the service in the foreground (useful
