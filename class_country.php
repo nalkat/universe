@@ -17,6 +17,8 @@ class Country
         private $unrestAccumulator;
         private $populationSeedTimer;
         private $immortalityChance;
+        private $adaptationLevel;
+        private $adaptationAccumulator;
 
         public function __construct (string $name, Planet $planet, array $profile = array())
         {
@@ -41,6 +43,8 @@ class Country
                 $this->unrestAccumulator = 0.0;
                 $this->populationSeedTimer = 0.0;
                 $this->immortalityChance = $this->sanitizeFraction($profile['immortality_chance'] ?? 0.0);
+                $this->adaptationLevel = $this->sanitizeFraction($profile['adaptation'] ?? 0.0);
+                $this->adaptationAccumulator = 0.0;
                 $this->planet->registerCountry($this);
                 $this->initializeEconomy();
         }
@@ -103,10 +107,16 @@ class Country
                         'technology' => $this->technology,
                         'resources' => $this->resourceIndex,
                         'stability' => $this->stability,
+                        'adaptation' => $this->adaptationLevel,
                         'population_capacity' => $this->populationCapacity,
                         'population' => $this->population,
                         'stockpiles' => $this->resourceStockpiles
                 );
+        }
+
+        public function getAdaptationLevel () : float
+        {
+                return $this->adaptationLevel;
         }
 
         public function improveInfrastructure (float $delta) : void
@@ -223,7 +233,21 @@ class Country
 
         public function provideFood (float $amount) : float
         {
-                return $this->consumeResource('food', $amount);
+                $requested = max(0.0, floatval($amount));
+                if ($requested <= 0.0) return 0.0;
+                $efficiency = 1.0 + ($this->adaptationLevel * 0.25);
+                $withdrawal = $requested / $efficiency;
+                $consumed = $this->consumeResource('food', $withdrawal);
+                $delivered = $consumed * $efficiency;
+                if ($delivered > $requested)
+                {
+                        return $requested;
+                }
+                if ($consumed < $withdrawal)
+                {
+                        $this->recordHardship(min(1.0, 1.0 - ($consumed / max(0.0001, $withdrawal))));
+                }
+                return $delivered;
         }
 
         public function getResourceStockpile (string $name) : float
@@ -248,7 +272,9 @@ class Country
                 $this->improveStability($progress * 0.85);
                 $this->rebalanceEmployment();
                 $this->runEconomy($deltaTime);
+                $this->investInAdaptation($deltaTime);
                 $this->advancePopulation($deltaTime);
+                $this->processAdaptation($deltaTime);
                 $alive = array();
                 foreach ($this->people as $person)
                 {
@@ -287,6 +313,12 @@ class Country
                                 $traits['mortality'] = 'immortal';
                                 $traits['immortal'] = true;
                         }
+                }
+                if ($this->adaptationLevel > 0.0)
+                {
+                        $baseResilience = 0.05 + ($this->adaptationLevel * 0.6);
+                        $variance = ((mt_rand() / mt_getrandmax()) - 0.5) * 0.2;
+                        $traits['resilience'] = max(0.0, min(1.0, $baseResilience + $variance));
                 }
                 return $traits;
         }
@@ -382,7 +414,8 @@ class Country
         private function needsFoodSupport () : bool
         {
                 $population = max(1, count($this->people));
-                $threshold = $population * 0.5;
+                $buffer = max(0.2, 0.5 - ($this->adaptationLevel * 0.2));
+                $threshold = $population * $buffer;
                 return ($this->getResourceStockpile('food') < $threshold);
         }
 
@@ -429,7 +462,12 @@ class Country
                 else
                 {
                         $foodPerCitizen = $this->getResourceStockpile('food') / max(1, $population);
-                        $foodFactor = max(0.0, min(1.2, $foodPerCitizen / 2.0));
+                        $foodFactor = max(0.0, min(1.2, ($foodPerCitizen / 2.0) * (1.0 + $this->adaptationLevel * 0.3)));
+                        $shortage = max(0.0, 1.0 - min(1.0, $foodPerCitizen));
+                        if ($shortage > 0)
+                        {
+                                $this->recordHardship($shortage * 0.5);
+                        }
                         $capacityFactor = ($this->populationCapacity <= 0)
                                 ? 0.0
                                 : min(1.0, $capacityRemaining / max(1, $this->populationCapacity * 0.3));
@@ -451,7 +489,7 @@ class Country
                         }
                 }
 
-                $unrestPressure = max(0.0, 0.45 - $this->stability);
+                $unrestPressure = max(0.0, 0.45 - $this->stability - ($this->adaptationLevel * 0.15));
                 if ($unrestPressure > 0)
                 {
                         $unrestRate = $unrestPressure * 0.00018;
@@ -461,6 +499,10 @@ class Country
                         {
                                 $this->unrestAccumulator -= $losses;
                                 $this->applyCasualties($losses, 'civil unrest');
+                        }
+                        else
+                        {
+                                $this->recordHardship(min(1.0, $unrestPressure * 0.5));
                         }
                 }
                 else
@@ -493,6 +535,7 @@ class Country
                 if ($losses > 0)
                 {
                         $this->pruneDeadCitizens();
+                        $this->recordHardship(min(1.0, $losses / max(1, $total)));
                         Utility::write($this->name . " lost $losses citizens to $cause", LOG_INFO, L_CONSOLE);
                 }
                 return $losses;
@@ -505,24 +548,26 @@ class Country
                 {
                         return array('casualties' => 0, 'infrastructure_loss' => 0.0, 'stability_loss' => 0.0);
                 }
-                $stabilityLoss = min(0.9, $intensity * 0.35);
-                $infrastructureLoss = min(0.9, $intensity * 0.4);
-                $technologyLoss = min(0.9, $intensity * 0.25);
+                $mitigation = max(0.2, 1.0 - ($this->adaptationLevel * 0.6));
+                $effectiveIntensity = min(1.0, $intensity * $mitigation);
+                $stabilityLoss = min(0.9, $effectiveIntensity * 0.35);
+                $infrastructureLoss = min(0.9, $effectiveIntensity * 0.4);
+                $technologyLoss = min(0.9, $effectiveIntensity * 0.25);
                 $this->stability = $this->sanitizeFraction($this->stability - $stabilityLoss);
                 $this->infrastructure = $this->sanitizeFraction($this->infrastructure - $infrastructureLoss);
                 $this->technology = $this->sanitizeFraction($this->technology - $technologyLoss);
-                $resourceLossFactor = min(0.95, $intensity * 0.6);
+                $resourceLossFactor = min(0.95, $effectiveIntensity * 0.6);
                 foreach ($this->resourceStockpiles as $resource => $amount)
                 {
                         $this->resourceStockpiles[$resource] = max(0.0, $amount * (1.0 - $resourceLossFactor));
                 }
-                $casualtyTarget = intval(round($this->population * min(0.95, $intensity * 0.45)));
+                $casualtyTarget = intval(round($this->population * min(0.95, $effectiveIntensity * 0.45)));
                 $casualties = $this->applyCasualties($casualtyTarget, $cause);
                 if ($casualties <= 0)
                 {
                         $this->pruneDeadCitizens();
                 }
-                $injury = $intensity * 0.2;
+                $injury = $effectiveIntensity * 0.2;
                 if ($injury > 0)
                 {
                         foreach ($this->people as $person)
@@ -533,8 +578,16 @@ class Country
                                 }
                         }
                 }
+                $casualtyFraction = ($casualties > 0 && $this->population + $casualties > 0)
+                        ? min(1.0, $casualties / max(1, $this->population + $casualties))
+                        : 0.0;
+                $this->recordHardship(min(1.0, $effectiveIntensity + ($casualtyFraction * 0.5)));
+                $mitigationNote = (abs($effectiveIntensity - $intensity) > 0.0001)
+                        ? " mitigated from " . number_format($intensity, 2)
+                        : '';
                 Utility::write(
-                        $this->name . " suffered a disaster from $cause (intensity " . number_format($intensity, 2) . ")",
+                        $this->name . " suffered a disaster from $cause (intensity " . number_format($effectiveIntensity, 2) .
+                        $mitigationNote . ")",
                         LOG_INFO,
                         L_CONSOLE
                 );
@@ -543,6 +596,47 @@ class Country
                         'infrastructure_loss' => $infrastructureLoss,
                         'stability_loss' => $stabilityLoss
                 );
+        }
+
+        private function investInAdaptation (float $deltaTime) : void
+        {
+                if ($deltaTime <= 0) return;
+                if ($this->population <= 0) return;
+                $need = max(0.0, 1.0 - $this->adaptationLevel);
+                if ($need <= 0.0) return;
+                $population = max(1, $this->population);
+                $materialsBudget = min($this->getResourceStockpile('materials') * 0.1, $deltaTime * 0.02 * $population);
+                if ($materialsBudget <= 0) return;
+                $materialsSpent = $this->consumeResource('materials', $materialsBudget);
+                if ($materialsSpent <= 0) return;
+                $wealthSpent = $this->consumeResource('wealth', $materialsSpent * 0.5);
+                $investment = ($materialsSpent + ($wealthSpent * 0.6)) / max(1.0, $population);
+                $this->adaptationAccumulator = min(5.0, $this->adaptationAccumulator + ($investment * ($need + 0.2)));
+        }
+
+        private function processAdaptation (float $deltaTime) : void
+        {
+                if ($deltaTime <= 0) return;
+                if ($this->adaptationAccumulator > 0.0)
+                {
+                        $gain = min(0.05, $this->adaptationAccumulator * 0.2);
+                        $this->adaptationAccumulator = max(0.0, $this->adaptationAccumulator - ($gain * 3.0));
+                        $this->adaptationLevel = $this->sanitizeFraction($this->adaptationLevel + $gain);
+                        return;
+                }
+                $decay = ($deltaTime / 604800.0) * 0.01;
+                if ($decay > 0)
+                {
+                        $this->adaptationLevel = max(0.0, $this->adaptationLevel - $decay);
+                }
+        }
+
+        private function recordHardship (float $severity) : void
+        {
+                $severity = max(0.0, min(1.0, $severity));
+                if ($severity <= 0.0) return;
+                $pressure = $severity * (1.0 + ($this->needsFoodSupport() ? 0.5 : 0.0));
+                $this->adaptationAccumulator = min(5.0, $this->adaptationAccumulator + $pressure);
         }
 
         private function pruneDeadCitizens () : void

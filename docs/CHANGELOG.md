@@ -7,3 +7,4 @@
 - Implemented hierarchical environment checks and readiness gating for countries and people.
 - Added a reusable UniverseSimulator orchestrator and updated the executable to drive galaxies, systems, and civilizations.
 - Ensured the UniverseSimulator tracks system registries per galaxy to avoid undefined index warnings during bootstrap.
+- Modeled personal resilience growth and national adaptation investments so populations can harden against famine and disasters over time.

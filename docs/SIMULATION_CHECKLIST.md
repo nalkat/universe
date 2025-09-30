@@ -6,3 +6,4 @@
 - [x] Improve the universe simulator executable to orchestrate subobject ticks.
 - [x] Document readiness criteria for population spawning.
 - [x] Introduce a blueprint-driven bootstrapper that wires galaxies, systems, planets, and countries together.
+- [x] Model resilience/adaptation loops so populations learn from famine and disasters.

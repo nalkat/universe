@@ -13,6 +13,8 @@ class Person extends Life
         private $agingInterval;
         private $agingAccumulator;
         private $mortalityModel;
+        private $resilienceExperience;
+        private $calmAccumulator;
 
         public function __construct (string $name, ?Country $homeCountry = null, array $traits = array())
         {
@@ -29,6 +31,8 @@ class Person extends Life
                 $this->agingInterval = max(3600.0, floatval($traits['aging_interval'] ?? 86400.0));
                 $this->agingAccumulator = 0.0;
                 $this->mortalityModel = strtolower(trim(strval($traits['mortality'] ?? 'finite')));
+                $this->resilienceExperience = 0.0;
+                $this->calmAccumulator = 0.0;
                 if ($this->mortalityModel === '')
                 {
                         $this->mortalityModel = 'finite';
@@ -36,6 +40,10 @@ class Person extends Life
                 if (in_array($this->mortalityModel, array('immortal', 'ageless', 'eternal'), true))
                 {
                         $this->setTrait('immortal', true);
+                }
+                if ($this->getResilience() <= 0.0)
+                {
+                        parent::improveResilience(0.05);
                 }
                 if ($homeCountry instanceof Country)
                 {
@@ -176,7 +184,9 @@ class Person extends Life
                         $skill->tick($deltaTime);
                 }
 
-                $this->hunger += ($deltaTime / $this->nutritionInterval);
+                $hungerDrift = ($deltaTime / $this->nutritionInterval);
+                $hungerDrift *= max(0.3, 1.0 - ($this->getResilience() * 0.25));
+                $this->hunger += $hungerDrift;
                 $foodNeeded = $this->dailyFoodNeed * ($deltaTime / 86400.0);
                 $foodReceived = 0.0;
                 if ($this->homeCountry instanceof Country)
@@ -201,6 +211,7 @@ class Person extends Life
                         $this->applyAging($this->agingAccumulator);
                         $this->agingAccumulator = 0.0;
                 }
+                $this->processResilienceGrowth($deltaTime);
         }
 
         private function satiate (float $consumed) : void
@@ -216,10 +227,17 @@ class Person extends Life
                 if ($deficit <= 0) return;
                 $dailyNeed = max(0.0001, $this->dailyFoodNeed);
                 $increase = $deficit / $dailyNeed;
-                $this->hunger += $increase;
+                $resilience = $this->getResilience();
+                $hungerMultiplier = max(0.25, 1.0 - ($resilience * 0.4));
+                $this->hunger += $increase * $hungerMultiplier;
                 $timeFactor = max(0.1, $deltaTime / 86400.0);
-                $damage = $increase * 0.12 * $timeFactor;
+                $damageMitigation = max(0.25, 1.0 - ($resilience * 0.65));
+                $damage = $increase * 0.12 * $timeFactor * $damageMitigation;
                 $this->modifyHealth(-$damage);
+                if ($this->isAlive())
+                {
+                        $this->accumulateResilience($increase * $timeFactor);
+                }
                 if ($this->hunger >= 2.0)
                 {
                         $this->kill('starvation');
@@ -231,7 +249,8 @@ class Person extends Life
                 if ($this->hunger > 0.8) return;
                 $timeFactor = $deltaTime / 86400.0;
                 if ($timeFactor <= 0) return;
-                $this->modifyHealth(0.02 * $timeFactor);
+                $recoveryBoost = 1.0 + ($this->getResilience() * 0.6);
+                $this->modifyHealth(0.02 * $timeFactor * $recoveryBoost);
         }
 
         private function applyAging (float $elapsedSeconds) : void
@@ -275,10 +294,51 @@ class Person extends Life
         {
                 $severity = max(0.0, floatval($severity));
                 if ($severity <= 0) return;
-                $this->modifyHealth(-$severity);
+                $resilience = $this->getResilience();
+                $mitigation = max(0.2, 1.0 - ($resilience * 0.6));
+                $damage = $severity * $mitigation;
+                $this->modifyHealth(-$damage);
                 if (!$this->isAlive())
                 {
                         $this->kill($cause);
+                        return;
+                }
+                $this->accumulateResilience($damage * 0.5);
+        }
+
+        private function accumulateResilience (float $pressure) : void
+        {
+                if ($pressure <= 0) return;
+                $this->resilienceExperience = min(5.0, $this->resilienceExperience + $pressure);
+                $this->calmAccumulator = 0.0;
+        }
+
+        private function processResilienceGrowth (float $deltaTime) : void
+        {
+                if ($deltaTime <= 0) return;
+                if ($this->resilienceExperience > 0.0)
+                {
+                        $gain = min(0.05, $this->resilienceExperience * 0.04);
+                        $this->resilienceExperience = max(0.0, $this->resilienceExperience - ($gain * 2.0));
+                        if ($gain > 0)
+                        {
+                                parent::improveResilience($gain);
+                        }
+                        return;
+                }
+                $this->calmAccumulator += $deltaTime;
+                if ($this->calmAccumulator >= 604800.0)
+                {
+                        $periods = floor($this->calmAccumulator / 604800.0);
+                        if ($periods > 0)
+                        {
+                                $decay = min(0.05, $periods * 0.01);
+                                if ($decay > 0)
+                                {
+                                        parent::reduceResilience($decay);
+                                }
+                                $this->calmAccumulator -= ($periods * 604800.0);
+                        }
                 }
         }
 }
