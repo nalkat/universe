@@ -60,6 +60,23 @@ Command-line deltas are no longer clamped back to hour-long steps, so advanced o
 can experiment with sub-second or even negative time slices when stress testing the
 simulation.
 
+### Planetary weather and narrative data
+
+Each generated planet now seeds a constellation of weather systems tuned to its
+climate profile. Storm tracks, monsoon cycles, dust fronts, and temperate jet streams
+rotate automatically as the simulation advances, with progress tracked through
+`Planet::getWeatherSystems()`, `Planet::getCurrentWeather()`, and `Planet::getWeatherHistory()`.
+These climate cues feed directly into the planet's descriptive text so the upcoming UI
+can present more than a bare name and habitability score.
+
+Stars, planets, countries, and citizens likewise publish narrative descriptions. Stars
+summarize their spectral class, temperature, luminosity, and stage; planets weave
+climate, resources, and the active weather cycle into a readable synopsis; countries
+compile founding lore and recent events; and every person now carries a backstory that
+references mentors, rivals, and shared community history. Access these strings via
+`SystemObject::getDescription()`, `Country::getDescription()`, and `Person::getBackstory()`
+to differentiate entries in upcoming UI layers.
+
 ## Desktop control panel
 
 The `tools/universe_gui.py` script offers a lightweight Tkinter interface for running

@@ -10,6 +10,11 @@ class Planet extends SystemObject
         private $habitabilityScore;
         private $habitabilityFactors;
         private $habitabilityClass;
+        private $weatherSystems;
+        private $weatherHistory;
+        private $currentWeatherIndex;
+        private $weatherTimer;
+        private $climateProfile;
 
         public function __construct (string $name, float $mass = 0.0, float $radius = 0.0, ?array $position = null, ?array $velocity = null)
         {
@@ -36,6 +41,12 @@ class Planet extends SystemObject
                 $this->habitabilityScore = 0.0;
                 $this->habitabilityFactors = array();
                 $this->habitabilityClass = 'barren';
+                $this->weatherSystems = array();
+                $this->weatherHistory = array();
+                $this->currentWeatherIndex = null;
+                $this->weatherTimer = 0.0;
+                $this->climateProfile = null;
+                $this->setDescription('A newly catalogued world awaiting survey data.');
         }
 
         public function setAtmosphere (array $composition) : void
@@ -87,6 +98,7 @@ class Planet extends SystemObject
                         $this->environment[$key] = self::normalizeFraction($incoming);
                 }
                 $this->updateHabitabilityScore();
+                $this->refreshEnvironmentalNarrative(true);
         }
 
         public function getEnvironment () : array
@@ -156,6 +168,45 @@ class Planet extends SystemObject
                 $cleanName = Utility::cleanse_string($name);
                 if (!isset($this->countries[$cleanName])) return null;
                 return $this->countries[$cleanName];
+        }
+
+        public function getWeatherSystems () : array
+        {
+                return $this->weatherSystems;
+        }
+
+        public function getCurrentWeather () : ?array
+        {
+                if ($this->currentWeatherIndex === null) return null;
+                if (!isset($this->weatherSystems[$this->currentWeatherIndex])) return null;
+                $current = $this->weatherSystems[$this->currentWeatherIndex];
+                $duration = floatval($current['duration'] ?? 0.0);
+                $elapsed = floatval($current['elapsed'] ?? 0.0);
+                $progress = ($duration > 0.0) ? max(0.0, min(1.0, $elapsed / $duration)) : 0.0;
+                return array(
+                        'name' => strval($current['name'] ?? 'weather system'),
+                        'type' => strval($current['type'] ?? 'unknown'),
+                        'intensity' => floatval($current['intensity'] ?? 0.0),
+                        'duration_hours' => ($duration > 0.0) ? ($duration / 3600.0) : 0.0,
+                        'progress' => $progress,
+                        'narrative' => strval($current['summary'] ?? '')
+                );
+        }
+
+        public function getWeatherHistory (int $limit = 10) : array
+        {
+                if ($limit <= 0) return array();
+                $history = array_reverse($this->weatherHistory);
+                return array_slice($history, 0, $limit);
+        }
+
+        public function describeClimate () : array
+        {
+                if ($this->climateProfile === null)
+                {
+                        $this->climateProfile = $this->deriveClimateProfile();
+                }
+                return $this->climateProfile;
         }
 
         public function getPopulationSummary () : array
@@ -236,6 +287,7 @@ class Planet extends SystemObject
                 {
                         parent::tick($deltaTime);
                 }
+                $this->advanceWeather($deltaTime);
                 foreach ($this->countries as $country)
                 {
                         $country->tick($deltaTime);
@@ -261,6 +313,7 @@ class Planet extends SystemObject
                 $this->environment['radiation'] = max(0.0, $this->environment['radiation'] * (1.0 - $intensity * 0.25));
                 $this->environment['gravity'] = max(0.0, min(1.0, $this->environment['gravity'] * (1.0 - $intensity * 0.1)));
                 $this->updateHabitabilityScore();
+                $this->refreshEnvironmentalNarrative(true);
                 foreach ($this->countries as $country)
                 {
                         if ($country instanceof Country)
@@ -298,6 +351,422 @@ class Planet extends SystemObject
                 $this->habitable = $analysis['habitable'];
                 $this->habitabilityFactors = $analysis['factors'];
                 $this->habitabilityClass = $analysis['classification'];
+                $this->refreshEnvironmentalNarrative(false);
+        }
+
+        private function refreshEnvironmentalNarrative (bool $forceWeather) : void
+        {
+                $this->climateProfile = $this->deriveClimateProfile();
+                $this->initializeWeatherSystems($forceWeather);
+                $this->refreshDescription();
+        }
+
+        private function deriveClimateProfile () : array
+        {
+                $env = $this->environment;
+                $temperature = floatval($env['temperature'] ?? 0.0);
+                $water = self::normalizeFraction($env['water'] ?? 0.0);
+                $atmosphere = self::normalizeFraction($env['atmosphere'] ?? 0.0);
+                $variance = self::normalizeFraction($env['climate_variance'] ?? 0.0);
+                $gravity = max(0.0, floatval($env['gravity'] ?? 0.0));
+                $pressure = max(0.0, floatval($env['pressure'] ?? 0.0));
+                $biosignatures = self::normalizeFraction($env['biosignatures'] ?? 0.0);
+                $resources = self::normalizeFraction($env['resources'] ?? 0.0);
+
+                $climateAdjective = 'temperate';
+                if ($temperature <= -120)
+                {
+                        $climateAdjective = 'cryogenic';
+                }
+                elseif ($temperature <= -40)
+                {
+                        $climateAdjective = 'glacial';
+                }
+                elseif ($temperature <= 5)
+                {
+                        $climateAdjective = 'chilled';
+                }
+                elseif ($temperature <= 28)
+                {
+                        $climateAdjective = 'temperate';
+                }
+                elseif ($temperature <= 55)
+                {
+                        $climateAdjective = 'warm';
+                }
+                elseif ($temperature <= 95)
+                {
+                        $climateAdjective = 'simmering';
+                }
+                else
+                {
+                        $climateAdjective = 'searing';
+                }
+
+                $humidityClass = 'balanced';
+                if ($water >= 0.8)
+                {
+                        $humidityClass = 'oceanic';
+                }
+                elseif ($water >= 0.6)
+                {
+                        $humidityClass = 'humid';
+                }
+                elseif ($water >= 0.4)
+                {
+                        $humidityClass = 'balanced';
+                }
+                elseif ($water >= 0.2)
+                {
+                        $humidityClass = 'arid';
+                }
+                else
+                {
+                        $humidityClass = 'desert';
+                }
+
+                $biomeDescriptor = 'continental';
+                switch ($humidityClass)
+                {
+                        case 'oceanic':
+                                $biomeDescriptor = ($temperature <= 0) ? 'glacial oceanic' : 'oceanic';
+                                break;
+                        case 'humid':
+                                $biomeDescriptor = ($temperature >= 30) ? 'tropical' : 'lush continental';
+                                break;
+                        case 'arid':
+                                $biomeDescriptor = ($temperature >= 40) ? 'sun-baked plateau' : 'semi-arid steppe';
+                                break;
+                        case 'desert':
+                                $biomeDescriptor = ($temperature >= 25) ? 'desert' : 'cold desert';
+                                break;
+                        default:
+                                $biomeDescriptor = 'continental';
+                                break;
+                }
+                if ($temperature <= -60)
+                {
+                        $biomeDescriptor = 'glacial expanse';
+                }
+                elseif ($temperature >= 120)
+                {
+                        $biomeDescriptor = 'volcanic badlands';
+                }
+
+                $seasonalityPhrase = 'with steady seasons';
+                $seasonalityDescriptor = 'steady sky currents';
+                if ($variance > 0.75)
+                {
+                        $seasonalityPhrase = 'with wild seasonal upheavals';
+                        $seasonalityDescriptor = 'tempestuous air rivers';
+                }
+                elseif ($variance > 0.5)
+                {
+                        $seasonalityPhrase = 'with dramatic seasonal swings';
+                        $seasonalityDescriptor = 'roaring jet streams';
+                }
+                elseif ($variance > 0.25)
+                {
+                        $seasonalityPhrase = 'with gentle seasonal cycles';
+                        $seasonalityDescriptor = 'measured sky tides';
+                }
+
+                $lifePhrase = 'No confirmed native biospheres yet catalogued.';
+                if ($biosignatures >= 0.75)
+                {
+                        $lifePhrase = 'Biospheres flourish across the landscape.';
+                }
+                elseif ($biosignatures >= 0.4)
+                {
+                        $lifePhrase = 'Signs of developing ecosystems cluster around sheltered regions.';
+                }
+                elseif ($biosignatures >= 0.2)
+                {
+                        $lifePhrase = 'Hardy microbial colonies trace mineral veins beneath the surface.';
+                }
+
+                $resourcePhrase = 'Resource outlook: scarce, requiring extensive imports.';
+                if ($resources >= 0.75)
+                {
+                        $resourcePhrase = 'Resource outlook: abundant strategic metals and organics.';
+                }
+                elseif ($resources >= 0.45)
+                {
+                        $resourcePhrase = 'Resource outlook: balanced reserves for sustainable development.';
+                }
+                elseif ($resources >= 0.25)
+                {
+                        $resourcePhrase = 'Resource outlook: sparse deposits demanding careful stewardship.';
+                }
+
+                $skyPhrase = 'Skies remain open with occasional cloud towers.';
+                if ($atmosphere <= 0.2 || $pressure <= 0.4)
+                {
+                        $skyPhrase = 'Skies are thin and reveal stark starfields.';
+                }
+                elseif ($atmosphere >= 0.85 && $pressure >= 1.1)
+                {
+                        $skyPhrase = 'Dense skies diffuse light into brilliant dawns.';
+                }
+
+                $gravityPhrase = 'Gravity aligns closely with human norms.';
+                if ($gravity <= 0.7)
+                {
+                        $gravityPhrase = 'Gravity runs light, encouraging towering formations.';
+                }
+                elseif ($gravity >= 1.3)
+                {
+                        $gravityPhrase = 'Gravity bears heavily on the landscape.';
+                }
+
+                $communityHook = 'Communities balance agrarian plains with skyward observatories.';
+                switch ($humidityClass)
+                {
+                        case 'oceanic':
+                                $communityHook = 'Communities trace their history along tidal archipelagos.';
+                                break;
+                        case 'humid':
+                                $communityHook = 'Communities thrive beneath monsoon-fed canopies and terraces.';
+                                break;
+                        case 'arid':
+                                $communityHook = 'Communities migrate between oases and wind-carved ridges.';
+                                break;
+                        case 'desert':
+                                $communityHook = 'Communities shelter in cavernous sanctuaries beneath dune seas.';
+                                break;
+                }
+                if ($variance > 0.7)
+                {
+                        $communityHook .= ' Seasonal migrations synchronize with the volatile climate.';
+                }
+
+                $stellarFlux = max(0.0, min(1.0, floatval($env['stellar_flux'] ?? 0.0)));
+                $weatherEnergy = min(1.0, max(0.0, ($variance * 0.65) + ($stellarFlux * 0.2) + ($atmosphere * 0.15)));
+
+                return array(
+                        'climate_adjective' => $climateAdjective,
+                        'biome_descriptor' => $biomeDescriptor,
+                        'humidity_class' => $humidityClass,
+                        'seasonality_phrase' => $seasonalityPhrase,
+                        'seasonality_descriptor' => $seasonalityDescriptor,
+                        'life_phrase' => $lifePhrase,
+                        'resource_phrase' => $resourcePhrase,
+                        'sky_phrase' => $skyPhrase,
+                        'gravity_phrase' => $gravityPhrase,
+                        'community_hook' => $communityHook,
+                        'weather_energy' => $weatherEnergy,
+                        'variance' => $variance,
+                        'temperature' => $temperature,
+                        'water' => $water
+                );
+        }
+
+        private function initializeWeatherSystems (bool $force) : void
+        {
+                if (!$force && !empty($this->weatherSystems))
+                {
+                        foreach ($this->weatherSystems as $index => $pattern)
+                        {
+                                $this->weatherSystems[$index]['intensity'] = $this->recalculateWeatherIntensity(floatval($pattern['intensity'] ?? 0.3));
+                                $this->weatherSystems[$index]['summary'] = $this->summarizeWeatherPattern($this->weatherSystems[$index]);
+                        }
+                        if ($this->currentWeatherIndex === null && !empty($this->weatherSystems))
+                        {
+                                $this->currentWeatherIndex = 0;
+                        }
+                        return;
+                }
+
+                $this->weatherSystems = array();
+                $profile = $this->describeClimate();
+                $volatility = max(0.0, min(1.0, floatval($this->environment['climate_variance'] ?? 0.0)));
+                $count = max(3, min(8, 3 + intval(round($volatility * 4))));
+                for ($i = 0; $i < $count; $i++)
+                {
+                        $this->weatherSystems[] = $this->createWeatherPattern($i, $profile);
+                }
+                if (empty($this->weatherSystems))
+                {
+                        $this->currentWeatherIndex = null;
+                        return;
+                }
+                $this->currentWeatherIndex = 0;
+                $this->weatherSystems[$this->currentWeatherIndex]['summary'] = $this->summarizeWeatherPattern($this->weatherSystems[$this->currentWeatherIndex]);
+                $this->weatherHistory = array();
+                $this->weatherTimer = 0.0;
+        }
+
+        private function createWeatherPattern (int $index, array $profile) : array
+        {
+                $archetypes = array(
+                        'oceanic' => array('tidal bloom', 'mariner squall', 'mistfall gyre', 'cyclonic surge'),
+                        'humid' => array('canopy deluge', 'jungle monsoon', 'fog tier procession', 'rainfront chorus'),
+                        'balanced' => array('continental rain band', 'jetstream sweep', 'temperate front', 'polar exchange'),
+                        'arid' => array('dusk gale', 'mirage storm', 'loess current', 'plateau gust'),
+                        'desert' => array('sirocco tide', 'dune cyclone', 'ember squall', 'sandglass surge')
+                );
+                $humidity = $profile['humidity_class'] ?? 'balanced';
+                if (!isset($archetypes[$humidity]))
+                {
+                        $humidity = 'balanced';
+                }
+                $options = $archetypes[$humidity];
+                $choice = $options[$index % count($options)];
+                $baseEnergy = floatval($profile['weather_energy'] ?? 0.4);
+                $intensity = $this->recalculateWeatherIntensity($baseEnergy + (((mt_rand() / mt_getrandmax()) - 0.5) * 0.2));
+                $durationHours = $this->generateWeatherDurationHours();
+                $pattern = array(
+                        'id' => sprintf('wx-%s-%d', substr(hash('crc32b', $this->getName() . $choice . microtime(true)), 0, 6), $index + 1),
+                        'name' => ucwords($choice),
+                        'type' => $humidity,
+                        'intensity' => $intensity,
+                        'duration' => $durationHours * 3600.0,
+                        'elapsed' => 0.0,
+                        'summary' => ''
+                );
+                $pattern['summary'] = $this->summarizeWeatherPattern($pattern);
+                return $pattern;
+        }
+
+        private function generateWeatherDurationHours () : int
+        {
+                $variance = max(0.0, min(1.0, floatval($this->environment['climate_variance'] ?? 0.0)));
+                $base = 10 + intval(round($variance * 40));
+                $min = max(6, $base - 6);
+                $max = max($min + 2, $base + 12);
+                return random_int($min, $max);
+        }
+
+        private function recalculateWeatherIntensity (float $baseline) : float
+        {
+                $energy = floatval($this->climateProfile['weather_energy'] ?? 0.4);
+                $noise = ((mt_rand() / mt_getrandmax()) - 0.5) * 0.25;
+                $result = ($baseline * 0.3) + ($energy * 0.6) + $noise + 0.1;
+                return max(0.05, min(1.0, $result));
+        }
+
+        private function describeIntensity (float $intensity) : string
+        {
+                if ($intensity < 0.2) return 'gentle';
+                if ($intensity < 0.4) return 'mild';
+                if ($intensity < 0.6) return 'brisk';
+                if ($intensity < 0.8) return 'intense';
+                return 'ferocious';
+        }
+
+        private function summarizeWeatherPattern (array $pattern) : string
+        {
+                $profile = $this->describeClimate();
+                $intensityLabel = $this->describeIntensity(floatval($pattern['intensity'] ?? 0.0));
+                $biome = strtolower(strval($profile['biome_descriptor'] ?? 'terrain'));
+                $seasonalityDescriptor = $profile['seasonality_descriptor'] ?? 'changing skies';
+                $name = strtolower(strval($pattern['name'] ?? 'weather system'));
+                $durationHours = max(1.0, floatval(($pattern['duration'] ?? 0.0) / 3600.0));
+                $line = sprintf('%s %s channels %s over the %s for roughly %.1f hours.', ucfirst($intensityLabel), $name, $seasonalityDescriptor, $biome, $durationHours);
+                $life = trim(strval($profile['life_phrase'] ?? ''));
+                if ($life !== '')
+                {
+                        $line .= ' ' . $life;
+                }
+                return $line;
+        }
+
+        private function advanceWeather (float $deltaTime) : void
+        {
+                if ($deltaTime <= 0) return;
+                if (empty($this->weatherSystems))
+                {
+                        $this->initializeWeatherSystems(true);
+                }
+                if (empty($this->weatherSystems)) return;
+                if ($this->currentWeatherIndex === null)
+                {
+                        $this->currentWeatherIndex = 0;
+                }
+                if (!isset($this->weatherSystems[$this->currentWeatherIndex])) return;
+
+                $deltaTime = floatval($deltaTime);
+                $this->weatherTimer += $deltaTime;
+                $current = $this->weatherSystems[$this->currentWeatherIndex];
+                $current['elapsed'] = floatval($current['elapsed'] ?? 0.0) + $deltaTime;
+                $duration = floatval($current['duration'] ?? 0.0);
+                if (($duration > 0.0) && ($current['elapsed'] >= $duration))
+                {
+                        $current['elapsed'] = $duration;
+                        $current['summary'] = $this->summarizeWeatherPattern($current);
+                        $this->weatherSystems[$this->currentWeatherIndex] = $current;
+                        $this->weatherHistory[] = $this->buildWeatherHistoryEntry($current);
+                        if (count($this->weatherHistory) > 24)
+                        {
+                                array_shift($this->weatherHistory);
+                        }
+                        $this->currentWeatherIndex = ($this->currentWeatherIndex + 1) % count($this->weatherSystems);
+                        $this->weatherTimer = 0.0;
+                        if (isset($this->weatherSystems[$this->currentWeatherIndex]))
+                        {
+                                $this->weatherSystems[$this->currentWeatherIndex]['elapsed'] = 0.0;
+                                $this->weatherSystems[$this->currentWeatherIndex]['summary'] = $this->summarizeWeatherPattern($this->weatherSystems[$this->currentWeatherIndex]);
+                        }
+                        $this->refreshDescription();
+                        return;
+                }
+
+                $this->weatherSystems[$this->currentWeatherIndex] = $current;
+                if ($this->weatherTimer >= 3600.0)
+                {
+                        $this->weatherSystems[$this->currentWeatherIndex]['summary'] = $this->summarizeWeatherPattern($current);
+                        $this->weatherTimer = 0.0;
+                        $this->refreshDescription();
+                }
+        }
+
+        private function buildWeatherHistoryEntry (array $pattern) : string
+        {
+                $name = strtolower(strval($pattern['name'] ?? 'weather system'));
+                $intensityLabel = $this->describeIntensity(floatval($pattern['intensity'] ?? 0.0));
+                $summary = trim(strval($pattern['summary'] ?? ''));
+                $entry = sprintf('%s %s completed its cycle.', ucfirst($intensityLabel), $name);
+                if ($summary !== '')
+                {
+                        $entry .= ' ' . $summary;
+                }
+                return $entry;
+        }
+
+        private function refreshDescription () : void
+        {
+                if ($this->climateProfile === null)
+                {
+                        $this->setDescription('Planetary climate data pending survey.');
+                        return;
+                }
+
+                $intro = sprintf(
+                        'A %s %s world %s.',
+                        $this->climateProfile['climate_adjective'],
+                        $this->climateProfile['biome_descriptor'],
+                        $this->climateProfile['seasonality_phrase']
+                );
+                $lifeLine = $this->climateProfile['life_phrase'];
+                $resourceLine = $this->climateProfile['resource_phrase'];
+                $skyLine = $this->climateProfile['sky_phrase'];
+                $gravityLine = $this->climateProfile['gravity_phrase'];
+                $habitabilityLine = sprintf(
+                        'Habitability score %.2f (%s).',
+                        $this->habitabilityScore,
+                        $this->habitabilityClass
+                );
+                $weather = $this->getCurrentWeather();
+                $weatherLine = ($weather === null) ? '' : $weather['narrative'];
+                $segments = array($intro, $lifeLine, $resourceLine, $skyLine, $gravityLine, $habitabilityLine, $weatherLine);
+                $filtered = array();
+                foreach ($segments as $segment)
+                {
+                        $segment = trim(strval($segment));
+                        if ($segment === '') continue;
+                        $filtered[] = $segment;
+                }
+                $this->setDescription(implode(' ', $filtered));
         }
 
         public static function analyzeHabitability (array $environment) : array

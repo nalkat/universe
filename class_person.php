@@ -15,6 +15,8 @@ class Person extends Life
         private $mortalityModel;
         private $resilienceExperience;
         private $calmAccumulator;
+        private $backstory;
+        private $relationships;
 
         public function __construct (string $name, ?Country $homeCountry = null, array $traits = array())
         {
@@ -33,6 +35,8 @@ class Person extends Life
                 $this->mortalityModel = strtolower(trim(strval($traits['mortality'] ?? 'finite')));
                 $this->resilienceExperience = 0.0;
                 $this->calmAccumulator = 0.0;
+                $this->backstory = '';
+                $this->relationships = array();
                 if ($this->mortalityModel === '')
                 {
                         $this->mortalityModel = 'finite';
@@ -161,6 +165,30 @@ class Person extends Life
         {
                 return $this->hunger;
                 return $this->skills;
+        }
+
+        public function setBackstory (string $backstory) : void
+        {
+                $normalized = trim(strval($backstory));
+                $this->backstory = $normalized;
+                $this->setTrait('backstory', $normalized);
+        }
+
+        public function getBackstory () : string
+        {
+                return $this->backstory;
+        }
+
+        public function addRelationship (string $role, string $name) : void
+        {
+                $key = Utility::cleanse_string($role);
+                if ($key === '') return;
+                $this->relationships[$key] = strval($name);
+        }
+
+        public function getRelationships () : array
+        {
+                return $this->relationships;
         }
 
         public function tick (float $deltaTime = 1.0) : void

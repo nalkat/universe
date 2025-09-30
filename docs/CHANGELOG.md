@@ -1,6 +1,9 @@
 # Change Log
 
 ## [Unreleased]
+- Added narrative descriptions to celestial bodies and settlements to support richer UI labeling, including dynamic star, planet, and country summaries.
+- Modeled persistent planetary weather systems that cycle through climate-informed patterns and feed into each world's descriptive text.
+- Wove collaborative citizen backstories using shared country chronicles so every person now references their community and relationships.
 - Documented simulation tasks and readiness goals for hierarchical spawning.
 - Replaced the EnVision dependency with a built-in telemetry module and updated consumers to reference the new metrics container.
 - Planned improvements for universe simulation orchestration.

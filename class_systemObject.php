@@ -11,6 +11,7 @@ class SystemObject
         protected $position;
         protected $velocity;
         protected $metadata;
+        protected $description;
         protected $parentSystem;
         protected $age;
         protected $destroyed;
@@ -25,6 +26,7 @@ class SystemObject
                 $this->position = $this->sanitizeVector($position);
                 $this->velocity = $this->sanitizeVector($velocity);
                 $this->metadata = array();
+                $this->description = '';
                 $this->parentSystem = null;
                 $this->age = floatval(0);
                 $this->destroyed = false;
@@ -221,6 +223,30 @@ class SystemObject
                 $dy = $this->position['y'] - $other['y'];
                 $dz = $this->position['z'] - $other['z'];
                 return sqrt(($dx * $dx) + ($dy * $dy) + ($dz * $dz));
+        }
+
+        public function setDescription (string $description) : void
+        {
+                $normalized = trim(strval($description));
+                $this->description = ($normalized === '') ? '' : $normalized;
+        }
+
+        public function getDescription () : string
+        {
+                return $this->description;
+        }
+
+        public function appendDescription (string $fragment) : void
+        {
+                $fragment = trim(strval($fragment));
+                if ($fragment === '') return;
+                if ($this->description === '')
+                {
+                        $this->description = $fragment;
+                        return;
+                }
+                $delimiter = (substr($this->description, -1) === '.') ? ' ' : '. ';
+                $this->description .= $delimiter . $fragment;
         }
 
         public function getGravitationalParameter () : float

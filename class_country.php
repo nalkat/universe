@@ -19,6 +19,8 @@ class Country
         private $immortalityChance;
         private $adaptationLevel;
         private $adaptationAccumulator;
+        private $culturalBackdrop;
+        private $chronicle;
 
         public function __construct (string $name, Planet $planet, array $profile = array())
         {
@@ -45,8 +47,11 @@ class Country
                 $this->immortalityChance = $this->sanitizeFraction($profile['immortality_chance'] ?? 0.0);
                 $this->adaptationLevel = $this->sanitizeFraction($profile['adaptation'] ?? 0.0);
                 $this->adaptationAccumulator = 0.0;
+                $this->culturalBackdrop = array();
+                $this->chronicle = array();
                 $this->planet->registerCountry($this);
                 $this->initializeEconomy();
+                $this->initializeLore();
         }
 
         public function getName () : string
@@ -174,6 +179,7 @@ class Country
                         $traits = $this->generateCitizenTraits();
                         $person = new Person($name, $this, $traits);
                         $this->people[] = $person;
+                        $this->assignCitizenBackstory($person);
                         $created[] = $person;
                 }
                 $this->population = count($this->people);
@@ -189,6 +195,30 @@ class Country
         public function getJobs () : array
         {
                 return $this->jobs;
+        }
+
+        public function getDescription () : string
+        {
+                $segments = array();
+                $foundation = trim(strval($this->culturalBackdrop['foundation'] ?? ''));
+                if ($foundation !== '') $segments[] = $foundation;
+                $hook = trim(strval($this->culturalBackdrop['hook'] ?? ''));
+                if ($hook !== '') $segments[] = $hook;
+                $resource = trim(strval($this->culturalBackdrop['resource'] ?? ''));
+                if ($resource !== '') $segments[] = $resource;
+                $recent = $this->extractRecentChronicleLine();
+                if ($recent !== '' && !in_array($recent, $segments, true)) $segments[] = $recent;
+                return implode(' ', $segments);
+        }
+
+        public function getChronicle () : array
+        {
+                return $this->chronicle;
+        }
+
+        public function getCulturalBackdrop () : array
+        {
+                return $this->culturalBackdrop;
         }
 
         public function addJob (Job $job) : void
@@ -350,6 +380,155 @@ class Country
                         'capacity' => 0,
                         'priority' => 5
                 )));
+        }
+
+        private function initializeLore () : void
+        {
+                $climate = $this->planet->describeClimate();
+                $planetDescription = $this->planet->getDescription();
+                $foundation = sprintf(
+                        '%s was founded amidst the %s reaches of %s %s.',
+                        $this->name,
+                        $climate['biome_descriptor'] ?? 'continental',
+                        $this->planet->getName(),
+                        $climate['seasonality_phrase'] ?? 'with steady seasons'
+                );
+                $life = trim(strval($climate['life_phrase'] ?? ''));
+                if ($life !== '')
+                {
+                        $foundation .= ' ' . $life;
+                }
+                $this->culturalBackdrop = array(
+                        'climate' => $climate,
+                        'planet_description' => $planetDescription,
+                        'foundation' => $foundation,
+                        'hook' => trim(strval($climate['community_hook'] ?? '')),
+                        'resource' => trim(strval($climate['resource_phrase'] ?? ''))
+                );
+                $this->chronicle = array();
+                $this->addChronicleEntry('foundation', $foundation);
+                if ($this->culturalBackdrop['hook'] !== '')
+                {
+                        $this->addChronicleEntry('tradition', $this->culturalBackdrop['hook']);
+                }
+                if ($this->culturalBackdrop['resource'] !== '')
+                {
+                        $this->addChronicleEntry('resources', $this->culturalBackdrop['resource']);
+                }
+        }
+
+        private function assignCitizenBackstory (Person $person) : void
+        {
+                $climate = $this->culturalBackdrop['climate'] ?? $this->planet->describeClimate();
+                $adjective = $climate['climate_adjective'] ?? 'temperate';
+                $biome = $climate['biome_descriptor'] ?? 'lands';
+                $seasonality = $climate['seasonality_phrase'] ?? 'with steady seasons';
+                $intro = sprintf(
+                        '%s grew up amid the %s %s of %s %s.',
+                        $person->getName(),
+                        $adjective,
+                        $biome,
+                        $this->name,
+                        $seasonality
+                );
+                $hook = trim(strval($this->culturalBackdrop['hook'] ?? ''));
+                $resource = trim(strval($this->culturalBackdrop['resource'] ?? ''));
+                $eventLine = $this->extractRecentChronicleLine();
+                $connections = $this->selectCommunityConnections($person);
+                $connectionLines = array();
+                $participants = array($person->getName());
+                foreach ($connections as $connection)
+                {
+                        $line = $this->composeConnectionLine($person, $connection['person'], $connection['role']);
+                        if ($line !== '')
+                        {
+                                $connectionLines[] = $line;
+                        }
+                        $role = $connection['role'];
+                        $otherName = $connection['person']->getName();
+                        $person->addRelationship($role, $otherName);
+                        $participants[] = $otherName;
+                }
+                $segments = array($intro);
+                if ($hook !== '') $segments[] = $hook;
+                if ($resource !== '') $segments[] = $resource;
+                if ($eventLine !== '') $segments[] = $eventLine;
+                $segments = array_merge($segments, $connectionLines);
+                $backstory = implode(' ', $segments);
+                $person->setBackstory($backstory);
+                $this->addChronicleEntry('biography', $backstory, $participants);
+        }
+
+        private function extractRecentChronicleLine () : string
+        {
+                for ($i = count($this->chronicle) - 1; $i >= 0; $i--)
+                {
+                        $entry = $this->chronicle[$i];
+                        if (!is_array($entry)) continue;
+                        $type = strval($entry['type'] ?? '');
+                        if ($type === 'biography') continue;
+                        $text = trim(strval($entry['text'] ?? ''));
+                        if ($text !== '')
+                        {
+                                return $text;
+                        }
+                }
+                return '';
+        }
+
+        private function selectCommunityConnections (Person $person) : array
+        {
+                $candidates = array();
+                foreach ($this->people as $resident)
+                {
+                        if (!($resident instanceof Person)) continue;
+                        if ($resident === $person) continue;
+                        if (!$resident->isAlive()) continue;
+                        $candidates[] = $resident;
+                }
+                if (empty($candidates)) return array();
+                shuffle($candidates);
+                $max = min(3, count($candidates));
+                $rolePool = array('mentor', 'friend', 'partner', 'rival', 'inspiration');
+                shuffle($rolePool);
+                $connections = array();
+                for ($i = 0; $i < $max; $i++)
+                {
+                        $role = $rolePool[$i % count($rolePool)];
+                        $connections[] = array('role' => $role, 'person' => $candidates[$i]);
+                }
+                return $connections;
+        }
+
+        private function composeConnectionLine (Person $person, Person $other, string $role) : string
+        {
+                $templates = array(
+                        'mentor' => '%s apprenticed under %s to master local crafts.',
+                        'friend' => '%s shares dawn gatherings with longtime friend %s.',
+                        'partner' => '%s charts communal projects alongside %s.',
+                        'rival' => '%s tests ambitions against rival %s during seasonal contests.',
+                        'inspiration' => '%s draws inspiration from the stories of %s.'
+                );
+                $template = $templates[$role] ?? '%s maintains close ties with %s.';
+                return sprintf($template, $person->getName(), $other->getName());
+        }
+
+        private function addChronicleEntry (string $type, string $text, array $participants = array()) : void
+        {
+                $cleanType = Utility::cleanse_string($type);
+                $normalizedText = trim(strval($text));
+                if ($normalizedText === '') return;
+                $entry = array(
+                        'type' => ($cleanType === '') ? 'event' : $cleanType,
+                        'text' => $normalizedText,
+                        'participants' => array_values(array_unique(array_filter(array_map('strval', $participants)))),
+                        'timestamp' => microtime(true)
+                );
+                $this->chronicle[] = $entry;
+                if (count($this->chronicle) > 64)
+                {
+                        array_shift($this->chronicle);
+                }
         }
 
         private function rebalanceEmployment () : void
@@ -591,6 +770,14 @@ class Country
                         LOG_INFO,
                         L_CONSOLE
                 );
+                $summary = sprintf(
+                        '%s weathered %s (intensity %.2f) with %d casualties.',
+                        $this->name,
+                        $cause,
+                        $effectiveIntensity,
+                        $casualties
+                );
+                $this->addChronicleEntry('disaster', $summary);
                 return array(
                         'casualties' => $casualties,
                         'infrastructure_loss' => $infrastructureLoss,

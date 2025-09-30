@@ -10,6 +10,7 @@
 - [x] Lift tick-length clamps so delta experimentation can venture into sub-second or extreme regimes.
 - [x] Model resilience/adaptation loops so populations learn from famine and disasters.
 - [x] Implement multi-factor planetary habitability analysis and classification to surface colonization priorities.
+- [x] Seed climate-driven weather cycles and narrative descriptions for planets, countries, and citizens.
 - [x] Establish material, chemical, and taxonomy scaffolding for future matter simulations.
 - [x] Flesh out plant, animal, and insect behaviours for ecological modelling.
 - [x] Create settlement and housing infrastructure classes to host emerging populations.
