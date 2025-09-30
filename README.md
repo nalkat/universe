@@ -36,6 +36,30 @@ when developing locally). To run a single batch of steps and print a summary, us
 php universe.php run-once --steps=5 --delta=7200
 ```
 
+### Universe generation controls
+
+Every invocation of `universe.php` now builds a fresh procedural blueprint instead of
+loading a small set of canned systems. The generator fills the sandbox with a dozen or
+more galaxies, each packed with scores of stellar systems and thousands of uniquely
+randomized planets. Their environmental conditions are evaluated for habitability using
+temperature, atmospheric chemistry, magnetic shielding, gravity, radiation exposure,
+resource richness, and climate stability. Habitable worlds spawn multiple autonomous
+countries with their own development profiles and population seeding plans.
+
+Use these command-line options with either `start` or `run-once` to steer the generator:
+
+- `--seed=<int>` – produce deterministic galaxies for repeatable tests.
+- `--galaxies=<int>` – override the number of galaxies created (defaults to 12–20).
+- `--systems-per-galaxy=<int>` – set the baseline system count per galaxy (defaults to 14 with randomized variance).
+- `--planets-per-system=<int>` – set the baseline planet count per system (defaults to 20 with randomized variance).
+
+The runtime summary now reports each planet's habitability class (`lush`, `temperate`,
+`marginal`, `hostile`, or `barren`) alongside the two dominant environmental factors that
+influenced the score so operators can quickly identify promising or precarious worlds.
+Command-line deltas are no longer clamped back to hour-long steps, so advanced operators
+can experiment with sub-second or even negative time slices when stress testing the
+simulation.
+
 ## Desktop control panel
 
 The `tools/universe_gui.py` script offers a lightweight Tkinter interface for running

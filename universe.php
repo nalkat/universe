@@ -15,6 +15,36 @@ enum UniverseCommand: string
 require_once __DIR__ . "/telemetry/class_telemetry.php";
 require_once __DIR__ . "/config.php";
 require_once __DIR__ . "/class_universeDaemon.php";
+
+set_time_limit(0);
+if (function_exists('ini_set'))
+{
+        ini_set('memory_limit', '-1');
+}
+
+$arguments = $_SERVER['argv'] ?? array();
+array_shift($arguments);
+$rawCommand = null;
+if (!empty($arguments) && !str_starts_with($arguments[0], '--'))
+{
+        $rawCommand = array_shift($arguments);
+}
+$options = universe_parse_options($arguments);
+$command = $rawCommand !== null ? UniverseCommand::fromString($rawCommand) : UniverseCommand::Start;
+if ($rawCommand !== null && $command === null)
+{
+        echo "Unknown command '{$rawCommand}'." . PHP_EOL;
+        universe_print_usage();
+        exit(1);
+}
+
+$blueprintSeed = universe_initialize_rng(isset($options['seed']) ? intval((string)$options['seed']) : null);
+
+if (!defined('UNIVERSE_ASTRONOMICAL_UNIT')) define('UNIVERSE_ASTRONOMICAL_UNIT', 1.495978707E11);
+if (!defined('UNIVERSE_SECONDS_PER_YEAR')) define('UNIVERSE_SECONDS_PER_YEAR', 31557600.0);
+if (!defined('UNIVERSE_EARTH_MASS')) define('UNIVERSE_EARTH_MASS', 5.972E24);
+if (!defined('UNIVERSE_EARTH_RADIUS')) define('UNIVERSE_EARTH_RADIUS', 6.371E6);
+if (!defined('UNIVERSE_EARTH_GRAVITY')) define('UNIVERSE_EARTH_GRAVITY', 9.80665);
 if (!is_dir(__DIR__ . '/logs'))
 {
         if (!mkdir(__DIR__ . '/logs', 0775, true) && !is_dir(__DIR__ . '/logs'))
@@ -50,146 +80,25 @@ Universe::setLocation (5000,5000,5000);
 $universe = new Universe("Marstellar", Universe::getMaxX(), Universe::getMaxY(), Universe::getMaxZ());
 $simulator = new UniverseSimulator($universe);
 
-$blueprint = array(
-        'galaxies' => array(
-                array(
-                        'name' => 'Permeoid',
-                        'size' => array('x' => 42.323, 'y' => 44.131, 'z' => 20.12),
-                        'systems' => array(
-                                array(
-                                        'name' => 'Helios',
-                                        'star' => array(
-                                                'name' => 'Helios',
-                                                'mass' => Star::SOLAR_MASS * 1.05,
-                                                'radius' => 6.9634E8 * 1.02,
-                                                'luminosity' => Star::SOLAR_LUMINOSITY * 1.1,
-                                                'temperature' => 5900,
-                                                'spectral_class' => 'G1V'
-                                        ),
-                                        'time_step' => 3600,
-                                        'propagation_mode' => System::PROPAGATION_ANALYTIC,
-                                        'planets' => array(
-                                                array(
-                                                        'name' => 'Maris',
-                                                        'mass' => 5.972E24,
-                                                        'radius' => 6.371E6,
-                                                        'environment' => array(
-                                                                'temperature' => 15,
-                                                                'water' => 0.71,
-                                                                'atmosphere' => 0.78,
-                                                                'magnetosphere' => 0.62,
-                                                                'biosignatures' => 0.72
-                                                        ),
-                                                        'habitable' => true,
-                                                        'orbit' => array(
-                                                                'semi_major_axis' => 1.496E11,
-                                                                'period' => 365.25 * 86400,
-                                                                'eccentricity' => 0.0167,
-                                                                'inclination_deg' => 0.5,
-                                                                'ascending_node_deg' => 174.9,
-                                                                'argument_of_periapsis_deg' => 288.1
-                                                        ),
-                                                        'countries' => array(
-                                                                array(
-                                                                        'name' => 'Aurora Republic',
-                                                                        'profile' => array(
-                                                                                'infrastructure' => 0.65,
-                                                                                'technology' => 0.62,
-                                                                                'resources' => 0.68,
-                                                                                'stability' => 0.6,
-                                                                                'population_capacity' => 2000000,
-                                                                                'development_rate' => 2.0
-                                                                        ),
-                                                                        'spawn_people' => 50000
-                                                                )
-                                                        )
-                                                ),
-                                                array(
-                                                        'name' => 'Thorne',
-                                                        'mass' => 6.39E23,
-                                                        'radius' => 3.389E6,
-                                                        'environment' => array(
-                                                                'temperature' => -40,
-                                                                'water' => 0.1,
-                                                                'atmosphere' => 0.05,
-                                                                'magnetosphere' => 0.1,
-                                                                'biosignatures' => 0.0
-                                                        ),
-                                                        'habitable' => false,
-                                                        'orbit' => array(
-                                                                'semi_major_axis' => 2.279E11,
-                                                                'period' => 687 * 86400,
-                                                                'eccentricity' => 0.0934,
-                                                                'inclination_deg' => 1.85,
-                                                                'ascending_node_deg' => 49.6,
-                                                                'argument_of_periapsis_deg' => 286.5
-                                                        )
-                                                )
-                                        )
-                                )
-                        )
-                ),
-                array(
-                        'name' => 'Andromeda',
-                        'size' => array('x' => 45.333, 'y' => 48.313, 'z' => 55.98),
-                        'systems' => array(
-                                array(
-                                        'name' => 'Nadir',
-                                        'star' => array(
-                                                'name' => 'Nadir',
-                                                'mass' => Star::SOLAR_MASS * 0.8,
-                                                'radius' => 6.9634E8 * 0.9,
-                                                'luminosity' => Star::SOLAR_LUMINOSITY * 0.6,
-                                                'temperature' => 4800,
-                                                'spectral_class' => 'K3V'
-                                        ),
-                                        'time_step' => 7200,
-                                        'propagation_mode' => System::PROPAGATION_NUMERICAL,
-                                        'softening_length' => 1.0E7,
-                                        'planets' => array(
-                                                array(
-                                                        'name' => 'Ilyra',
-                                                        'mass' => 4.8E24,
-                                                        'radius' => 6.1E6,
-                                                        'environment' => array(
-                                                                'temperature' => 5,
-                                                                'water' => 0.6,
-                                                                'atmosphere' => 0.7,
-                                                                'magnetosphere' => 0.58,
-                                                                'biosignatures' => 0.55
-                                                        ),
-                                                        'habitable' => true,
-                                                        'orbit' => array(
-                                                                'semi_major_axis' => 1.1E11,
-                                                                'period' => 320 * 86400,
-                                                                'eccentricity' => 0.05,
-                                                                'inclination_deg' => 12.0,
-                                                                'ascending_node_deg' => 88.0,
-                                                                'argument_of_periapsis_deg' => 45.0
-                                                        ),
-                                                        'countries' => array(
-                                                                array(
-                                                                        'name' => 'Celes Dominion',
-                                                                        'profile' => array(
-                                                                                'infrastructure' => 0.6,
-                                                                                'technology' => 0.58,
-                                                                                'resources' => 0.61,
-                                                                                'stability' => 0.58,
-                                                                                'population_capacity' => 1500000,
-                                                                                'development_rate' => 1.5
-                                                                        ),
-                                                                        'spawn_people' => 25000
-                                                                )
-                                                        )
-                                                )
-                                        )
-                                )
-                        )
-                )
-        )
-);
-
+$blueprintOptions = $options;
+$blueprintOptions['seed_used'] = $blueprintSeed;
+$blueprint = universe_generate_blueprint($universe, $blueprintOptions);
 $simulator->bootstrap($blueprint);
+
+$blueprintMetadata = $blueprint['metadata']['statistics'] ?? null;
+if (is_array($blueprintMetadata))
+{
+        $logMessage = sprintf(
+                'Generated %d galaxies, %d systems, and %d planets (seed %d, %d habitable, %d countries)',
+                intval($blueprintMetadata['galaxies'] ?? 0),
+                intval($blueprintMetadata['systems'] ?? 0),
+                intval($blueprintMetadata['planets'] ?? 0),
+                $blueprintSeed,
+                intval($blueprintMetadata['habitable_planets'] ?? 0),
+                intval($blueprintMetadata['countries'] ?? 0)
+        );
+        Utility::write($logMessage, LOG_INFO, L_CONSOLE);
+}
 
 /**
  * @param string[] $arguments
@@ -223,6 +132,736 @@ function universe_parse_options (array $arguments) : array
         return $options;
 }
 
+function universe_initialize_rng (?int $seed = null) : int
+{
+        if ($seed === null)
+        {
+                try
+                {
+                        $seed = random_int(PHP_INT_MIN, PHP_INT_MAX);
+                }
+                catch (Throwable)
+                {
+                        $seed = mt_rand();
+                }
+        }
+        if (function_exists('mt_srand'))
+        {
+                if (PHP_VERSION_ID >= 70100)
+                {
+                        mt_srand($seed, MT_RAND_MT19937);
+                }
+                else
+                {
+                        mt_srand($seed);
+                }
+        }
+        return $seed;
+}
+
+function universe_rand_float (float $min, float $max) : float
+{
+        if ($min > $max)
+        {
+                [$min, $max] = array($max, $min);
+        }
+        if ($min === $max)
+        {
+                return $min;
+        }
+        return $min + (mt_rand() / mt_getrandmax()) * ($max - $min);
+}
+
+function universe_rand_int (int $min, int $max) : int
+{
+        if ($min > $max)
+        {
+                [$min, $max] = array($max, $min);
+        }
+        return mt_rand($min, $max);
+}
+
+function universe_pick (array $values)
+{
+        if (empty($values))
+        {
+                return null;
+        }
+        $index = universe_rand_int(0, count($values) - 1);
+        $arrayValues = array_values($values);
+        return $arrayValues[$index];
+}
+
+function universe_weighted_choice (array $choices)
+{
+        if (empty($choices))
+        {
+                return null;
+        }
+        $total = 0.0;
+        foreach ($choices as $choice => $weight)
+        {
+                $total += max(0.0, floatval($weight));
+        }
+        if ($total <= 0.0)
+        {
+                return array_key_first($choices);
+        }
+        $roll = universe_rand_float(0.0, $total);
+        $accumulated = 0.0;
+        foreach ($choices as $choice => $weight)
+        {
+                $accumulated += max(0.0, floatval($weight));
+                if ($roll <= $accumulated)
+                {
+                        return $choice;
+                }
+        }
+        return array_key_last($choices);
+}
+
+function universe_clamp (float $value, float $min, float $max) : float
+{
+        if ($min > $max)
+        {
+                [$min, $max] = array($max, $min);
+        }
+        if ($value < $min) return $min;
+        if ($value > $max) return $max;
+        return $value;
+}
+
+function universe_gaussian (float $value, float $mean, float $spread) : float
+{
+        if ($spread <= 0.0)
+        {
+                return ($value === $mean) ? 1.0 : 0.0;
+        }
+        $delta = $value - $mean;
+        return exp(-($delta * $delta) / (2.0 * $spread * $spread));
+}
+
+function universe_generate_unique_name (string $category, ?int $syllables = null) : string
+{
+        static $registry = array();
+        $categoryKey = strtolower($category);
+        if (!isset($registry[$categoryKey]))
+        {
+                $registry[$categoryKey] = array();
+        }
+        $syllableRanges = array(
+                'galaxy' => array(3, 4),
+                'system' => array(2, 3),
+                'star' => array(2, 3),
+                'planet' => array(2, 4),
+                'country' => array(2, 3)
+        );
+        $range = $syllableRanges[$categoryKey] ?? array(2, 3);
+        if ($syllables === null)
+        {
+                $syllables = universe_rand_int($range[0], $range[1]);
+        }
+        $consonants = array('b','c','d','f','g','h','j','k','l','m','n','p','qu','r','s','t','v','w','x','z','br','cr','dr','gr','pr','st','tr','vr','ph','th','cl','gl');
+        $vowels = array('a','e','i','o','u','ae','ai','ia','io','oa','ou');
+        $attempts = 0;
+        $name = '';
+        do
+        {
+                $attempts++;
+                $segments = array();
+                $useConsonant = (universe_rand_int(0, 1) === 1);
+                for ($i = 0; $i < $syllables; $i++)
+                {
+                        if ($useConsonant)
+                        {
+                                $segments[] = strval(universe_pick($consonants));
+                        }
+                        else
+                        {
+                                $segments[] = strval(universe_pick($vowels));
+                        }
+                        $useConsonant = !$useConsonant;
+                }
+                $core = implode('', $segments);
+                switch ($categoryKey)
+                {
+                        case 'galaxy':
+                                $suffixes = array('ia','ara','ion','arae','ora','yx','eus');
+                                $core .= strval(universe_pick($suffixes));
+                                break;
+
+                        case 'star':
+                                $suffixes = array('a','on','ion','os','eus','ar','et','is');
+                                $core .= strval(universe_pick($suffixes));
+                                break;
+
+                        case 'country':
+                                $suffixes = array('ia','ara','on','ea','ium','ara');
+                                $core .= strval(universe_pick($suffixes));
+                                break;
+                }
+                $name = ucfirst($core);
+                if ($categoryKey === 'system' && universe_rand_int(0, 1) === 1)
+                {
+                        $designators = array('Prime','Reach','Gate','Station','Node','Spire');
+                        $name .= ' ' . strval(universe_pick($designators));
+                }
+        }
+        while (isset($registry[$categoryKey][$name]) && $attempts < 50);
+        if (isset($registry[$categoryKey][$name]))
+        {
+                $name .= '-' . universe_rand_int(2, 9999);
+        }
+        $registry[$categoryKey][$name] = true;
+        return $name;
+}
+
+function universe_generate_blueprint (Universe $universe, array $options = array()) : array
+{
+        $galaxyCount = isset($options['galaxies']) ? max(1, intval((string)$options['galaxies'])) : universe_rand_int(12, 20);
+        $systemsBaseline = isset($options['systems-per-galaxy']) ? max(2, intval((string)$options['systems-per-galaxy'])) : 14;
+        $planetsBaseline = isset($options['planets-per-system']) ? max(3, intval((string)$options['planets-per-system'])) : 20;
+
+        $remainingSpace = array(
+                'x' => Universe::getMaxX(),
+                'y' => Universe::getMaxY(),
+                'z' => Universe::getMaxZ()
+        );
+
+        $totals = array(
+                'galaxies' => 0,
+                'systems' => 0,
+                'planets' => 0,
+                'habitable' => 0,
+                'countries' => 0,
+                'population_capacity' => 0,
+                'habitability_sum' => 0.0
+        );
+
+        $galaxies = array();
+        for ($galaxyIndex = 0; $galaxyIndex < $galaxyCount; $galaxyIndex++)
+        {
+                $remaining = $galaxyCount - $galaxyIndex - 1;
+                $size = universe_allocate_galaxy_size($remainingSpace, $remaining);
+                $systemCount = universe_rand_int(max(3, $systemsBaseline - 2), $systemsBaseline + 4);
+                $systems = array();
+                for ($systemIndex = 0; $systemIndex < $systemCount; $systemIndex++)
+                {
+                        $starProfile = universe_generate_star_profile();
+                        $starProfile['name'] = universe_generate_unique_name('star');
+                        $systems[] = array(
+                                'name' => universe_generate_unique_name('system'),
+                                'star' => $starProfile,
+                                'time_step' => universe_rand_float(90.0, 7200.0),
+                                'propagation_mode' => universe_weighted_choice(array(
+                                        System::PROPAGATION_ANALYTIC => 0.6,
+                                        System::PROPAGATION_NUMERICAL => 0.4
+                                )),
+                                'softening_length' => universe_rand_float(5.0E6, 5.0E7),
+                                'planets' => universe_generate_planetary_system($starProfile, $planetsBaseline, $totals)
+                        );
+                }
+                $galaxies[] = array(
+                        'name' => universe_generate_unique_name('galaxy'),
+                        'size' => $size,
+                        'systems' => $systems
+                );
+                $totals['galaxies']++;
+                $totals['systems'] += count($systems);
+        }
+
+        $metadata = array(
+                'seed' => $options['seed_used'] ?? null,
+                'parameters' => array(
+                        'galaxies' => $galaxyCount,
+                        'systems_per_galaxy' => $systemsBaseline,
+                        'planets_per_system' => $planetsBaseline
+                ),
+                'statistics' => array(
+                        'galaxies' => $totals['galaxies'],
+                        'systems' => $totals['systems'],
+                        'planets' => $totals['planets'],
+                        'habitable_planets' => $totals['habitable'],
+                        'countries' => $totals['countries'],
+                        'population_capacity' => $totals['population_capacity'],
+                        'average_habitability' => ($totals['planets'] > 0) ? $totals['habitability_sum'] / $totals['planets'] : 0.0
+                )
+        );
+
+        return array(
+                'metadata' => $metadata,
+                'galaxies' => $galaxies
+        );
+}
+
+function universe_allocate_galaxy_size (array &$remainingSpace, int $galaxiesLeft) : array
+{
+        $sizes = array();
+        foreach (array('x', 'y', 'z') as $axis)
+        {
+                $available = max(500.0, floatval($remainingSpace[$axis] ?? 0.0));
+                $share = $available / max(1, $galaxiesLeft + 1);
+                $min = max(300.0, $share * 0.7);
+                $max = max($min + 1.0, min($available, $share * 1.4));
+                $sizes[$axis] = universe_rand_float($min, $max);
+                $remainingSpace[$axis] = max(0.0, $available - $sizes[$axis]);
+        }
+        return $sizes;
+}
+
+function universe_generate_star_profile () : array
+{
+        $bands = array(
+                array(
+                        'label' => 'O',
+                        'mass' => array(8.0, 16.0),
+                        'radius' => array(4.0, 9.0),
+                        'temperature' => array(30000.0, 38000.0),
+                        'luminosity' => array(20000.0, 90000.0),
+                        'weight' => 0.02,
+                        'luminosity_class' => array('Ia' => 0.4, 'Ib' => 0.2, 'II' => 0.2, 'III' => 0.1, 'V' => 0.1)
+                ),
+                array(
+                        'label' => 'B',
+                        'mass' => array(2.1, 8.0),
+                        'radius' => array(1.8, 5.0),
+                        'temperature' => array(10000.0, 28000.0),
+                        'luminosity' => array(25.0, 20000.0),
+                        'weight' => 0.04,
+                        'luminosity_class' => array('V' => 0.4, 'IV' => 0.2, 'III' => 0.2, 'II' => 0.1, 'Ib' => 0.1)
+                ),
+                array(
+                        'label' => 'A',
+                        'mass' => array(1.4, 2.1),
+                        'radius' => array(1.3, 2.0),
+                        'temperature' => array(7500.0, 10000.0),
+                        'luminosity' => array(5.0, 25.0),
+                        'weight' => 0.07,
+                        'luminosity_class' => array('V' => 0.55, 'IV' => 0.2, 'III' => 0.2, 'II' => 0.05)
+                ),
+                array(
+                        'label' => 'F',
+                        'mass' => array(1.04, 1.4),
+                        'radius' => array(1.1, 1.6),
+                        'temperature' => array(6000.0, 7500.0),
+                        'luminosity' => array(1.5, 5.0),
+                        'weight' => 0.12,
+                        'luminosity_class' => array('V' => 0.65, 'IV' => 0.2, 'III' => 0.15)
+                ),
+                array(
+                        'label' => 'G',
+                        'mass' => array(0.8, 1.04),
+                        'radius' => array(0.85, 1.1),
+                        'temperature' => array(5200.0, 6000.0),
+                        'luminosity' => array(0.6, 1.5),
+                        'weight' => 0.18,
+                        'luminosity_class' => array('V' => 0.7, 'IV' => 0.15, 'III' => 0.15)
+                ),
+                array(
+                        'label' => 'K',
+                        'mass' => array(0.45, 0.8),
+                        'radius' => array(0.7, 0.95),
+                        'temperature' => array(3700.0, 5200.0),
+                        'luminosity' => array(0.08, 0.6),
+                        'weight' => 0.24,
+                        'luminosity_class' => array('V' => 0.75, 'IV' => 0.15, 'III' => 0.1)
+                ),
+                array(
+                        'label' => 'M',
+                        'mass' => array(0.08, 0.45),
+                        'radius' => array(0.1, 0.7),
+                        'temperature' => array(2400.0, 3700.0),
+                        'luminosity' => array(0.0001, 0.08),
+                        'weight' => 0.33,
+                        'luminosity_class' => array('V' => 0.8, 'IV' => 0.1, 'III' => 0.1)
+                )
+        );
+
+        $weights = array();
+        foreach ($bands as $band)
+        {
+                $weights[$band['label']] = $band['weight'];
+        }
+        $selectedLabel = universe_weighted_choice($weights);
+        $band = null;
+        foreach ($bands as $candidate)
+        {
+                if ($candidate['label'] === $selectedLabel)
+                {
+                        $band = $candidate;
+                        break;
+                }
+        }
+        if ($band === null)
+        {
+                $band = $bands[count($bands) - 1];
+        }
+
+        $massRatio = universe_rand_float($band['mass'][0], $band['mass'][1]);
+        $radiusRatio = universe_rand_float($band['radius'][0], $band['radius'][1]);
+        $luminosityRatio = universe_rand_float($band['luminosity'][0], $band['luminosity'][1]);
+        $temperature = universe_rand_float($band['temperature'][0], $band['temperature'][1]);
+        $subclass = universe_rand_int(0, 9);
+        $luminosityClass = universe_weighted_choice($band['luminosity_class']);
+        $spectralClass = $band['label'] . $subclass . $luminosityClass;
+
+        return array(
+                'mass' => Star::SOLAR_MASS * $massRatio,
+                'radius' => 6.9634E8 * $radiusRatio,
+                'luminosity' => Star::SOLAR_LUMINOSITY * $luminosityRatio,
+                'temperature' => $temperature,
+                'spectral_class' => $spectralClass
+        );
+}
+
+function universe_generate_planetary_system (array $starProfile, int $planetsBaseline, array &$totals) : array
+{
+        $count = universe_rand_int(max(4, $planetsBaseline - 3), $planetsBaseline + 6);
+        $slots = array();
+        for ($i = 0; $i < $count; $i++)
+        {
+                $slots[] = universe_rand_float(0.0, 1.0);
+        }
+        sort($slots);
+        $planets = array();
+        foreach ($slots as $index => $slot)
+        {
+                $planetName = universe_generate_unique_name('planet');
+                $planets[] = universe_build_planet_spec($planetName, $starProfile, $slot, $index, $count, $totals);
+        }
+        return $planets;
+}
+
+function universe_build_planet_spec (string $planetName, array $starProfile, float $normalizedOrbit, int $index, int $count, array &$totals) : array
+{
+        $totals['planets']++;
+
+        $starMassRatio = max(0.05, $starProfile['mass'] / Star::SOLAR_MASS);
+        $starLuminosityRatio = max(0.0001, $starProfile['luminosity'] / Star::SOLAR_LUMINOSITY);
+
+        $planetTypeKey = universe_select_planet_type($normalizedOrbit);
+        $planetCatalog = array(
+                'dwarf' => array(
+                        'mass' => array(0.05, 0.3),
+                        'radius' => array(0.25, 0.6),
+                        'radius_scale' => 0.28,
+                        'greenhouse' => array(-90.0, -20.0),
+                        'albedo' => array(0.4, 0.7),
+                        'water' => array(0.05, 0.45),
+                        'atmosphere' => array(0.0, 0.25),
+                        'magnetosphere' => array(0.0, 0.25),
+                        'pressure' => array(0.05, 0.3),
+                        'resources' => array(0.3, 0.7),
+                        'geology' => array(0.4, 0.7),
+                        'climate_variance' => array(0.3, 0.6),
+                        'biosignature_bias' => 0.0
+                ),
+                'terrestrial' => array(
+                        'mass' => array(0.5, 1.5),
+                        'radius' => array(0.85, 1.2),
+                        'radius_scale' => 0.28,
+                        'greenhouse' => array(0.0, 30.0),
+                        'albedo' => array(0.2, 0.4),
+                        'water' => array(0.4, 0.9),
+                        'atmosphere' => array(0.5, 0.9),
+                        'magnetosphere' => array(0.4, 0.8),
+                        'pressure' => array(0.6, 1.4),
+                        'resources' => array(0.5, 0.9),
+                        'geology' => array(0.5, 0.9),
+                        'climate_variance' => array(0.1, 0.3),
+                        'biosignature_bias' => 0.2
+                ),
+                'super_earth' => array(
+                        'mass' => array(1.5, 5.0),
+                        'radius' => array(1.1, 1.9),
+                        'radius_scale' => 0.25,
+                        'greenhouse' => array(5.0, 45.0),
+                        'albedo' => array(0.15, 0.35),
+                        'water' => array(0.3, 0.8),
+                        'atmosphere' => array(0.5, 0.95),
+                        'magnetosphere' => array(0.4, 0.9),
+                        'pressure' => array(0.8, 1.8),
+                        'resources' => array(0.6, 0.95),
+                        'geology' => array(0.5, 0.85),
+                        'climate_variance' => array(0.1, 0.35),
+                        'biosignature_bias' => 0.25
+                ),
+                'ocean' => array(
+                        'mass' => array(0.8, 4.0),
+                        'radius' => array(1.0, 1.8),
+                        'radius_scale' => 0.27,
+                        'greenhouse' => array(5.0, 35.0),
+                        'albedo' => array(0.25, 0.55),
+                        'water' => array(0.6, 1.0),
+                        'atmosphere' => array(0.6, 0.95),
+                        'magnetosphere' => array(0.4, 0.85),
+                        'pressure' => array(0.8, 1.6),
+                        'resources' => array(0.5, 0.85),
+                        'geology' => array(0.4, 0.7),
+                        'climate_variance' => array(0.1, 0.3),
+                        'biosignature_bias' => 0.3
+                ),
+                'volcanic' => array(
+                        'mass' => array(0.6, 1.8),
+                        'radius' => array(0.8, 1.3),
+                        'radius_scale' => 0.28,
+                        'greenhouse' => array(20.0, 80.0),
+                        'albedo' => array(0.15, 0.35),
+                        'water' => array(0.05, 0.4),
+                        'atmosphere' => array(0.4, 0.8),
+                        'magnetosphere' => array(0.3, 0.7),
+                        'pressure' => array(0.7, 1.6),
+                        'resources' => array(0.6, 0.95),
+                        'geology' => array(0.7, 1.0),
+                        'climate_variance' => array(0.2, 0.5),
+                        'biosignature_bias' => 0.1
+                ),
+                'ice_giant' => array(
+                        'mass' => array(8.0, 40.0),
+                        'radius' => array(2.5, 5.5),
+                        'radius_scale' => 0.32,
+                        'greenhouse' => array(-120.0, -40.0),
+                        'albedo' => array(0.4, 0.7),
+                        'water' => array(0.1, 0.5),
+                        'atmosphere' => array(0.2, 0.6),
+                        'magnetosphere' => array(0.3, 0.7),
+                        'pressure' => array(0.5, 1.2),
+                        'resources' => array(0.5, 0.9),
+                        'geology' => array(0.4, 0.7),
+                        'climate_variance' => array(0.2, 0.5),
+                        'biosignature_bias' => 0.0
+                ),
+                'gas_giant' => array(
+                        'mass' => array(30.0, 250.0),
+                        'radius' => array(5.0, 12.0),
+                        'radius_scale' => 0.5,
+                        'greenhouse' => array(60.0, 150.0),
+                        'albedo' => array(0.3, 0.6),
+                        'water' => array(0.0, 0.2),
+                        'atmosphere' => array(0.7, 1.0),
+                        'magnetosphere' => array(0.6, 1.0),
+                        'pressure' => array(1.0, 2.0),
+                        'resources' => array(0.7, 1.0),
+                        'geology' => array(0.2, 0.5),
+                        'climate_variance' => array(0.2, 0.5),
+                        'biosignature_bias' => 0.0
+                )
+        );
+        if (!isset($planetCatalog[$planetTypeKey]))
+        {
+                $planetTypeKey = 'terrestrial';
+        }
+        $type = $planetCatalog[$planetTypeKey];
+
+        $massRatio = universe_rand_float($type['mass'][0], $type['mass'][1]);
+        $radiusRatio = universe_clamp(pow($massRatio, $type['radius_scale']), $type['radius'][0], $type['radius'][1]);
+
+        $mass = UNIVERSE_EARTH_MASS * $massRatio;
+        $radius = UNIVERSE_EARTH_RADIUS * $radiusRatio;
+
+        $innerLimit = 0.08;
+        $outerLimit = 45.0 * max(0.6, sqrt($starMassRatio));
+        $semiMajorAxisAu = universe_clamp($innerLimit + $normalizedOrbit * ($outerLimit - $innerLimit), $innerLimit, $outerLimit);
+        $semiMajorAxisAu = min($semiMajorAxisAu + ($index * 0.05), $outerLimit);
+        $semiMajorAxis = $semiMajorAxisAu * UNIVERSE_ASTRONOMICAL_UNIT;
+
+        $periodYears = sqrt(pow($semiMajorAxisAu, 3) / max(0.05, $starMassRatio));
+        $periodSeconds = $periodYears * UNIVERSE_SECONDS_PER_YEAR;
+
+        $eccentricity = universe_clamp(universe_rand_float(0.0, 0.25 + $normalizedOrbit * 0.5), 0.0, 0.92);
+        $inclination = universe_rand_float(0.0, 5.0 + $normalizedOrbit * 12.0);
+        $ascendingNode = universe_rand_float(0.0, 360.0);
+        $argumentOfPeriapsis = universe_rand_float(0.0, 360.0);
+        $phase = universe_rand_float(0.0, 2.0 * pi());
+
+        $albedo = universe_clamp(universe_rand_float($type['albedo'][0], $type['albedo'][1]), 0.0, 0.95);
+        $greenhouse = universe_rand_float($type['greenhouse'][0], $type['greenhouse'][1]);
+        $flux = $starLuminosityRatio / max(0.01, $semiMajorAxisAu * $semiMajorAxisAu);
+        $fluxAdjusted = max(0.0001, $flux * (1.0 - $albedo));
+        $equilibriumTempK = 278.0 * pow($fluxAdjusted, 0.25);
+        $temperatureC = ($equilibriumTempK - 273.15) + $greenhouse;
+
+        $water = universe_clamp(universe_rand_float($type['water'][0], $type['water'][1]), 0.0, 1.0);
+        $atmosphere = universe_clamp(universe_rand_float($type['atmosphere'][0], $type['atmosphere'][1]), 0.0, 1.0);
+        $magnetosphere = universe_clamp(universe_rand_float($type['magnetosphere'][0], $type['magnetosphere'][1]), 0.0, 1.0);
+        $pressureBase = universe_rand_float($type['pressure'][0], $type['pressure'][1]);
+        $resources = universe_clamp(universe_rand_float($type['resources'][0], $type['resources'][1]), 0.0, 1.0);
+        $geology = universe_clamp(universe_rand_float($type['geology'][0], $type['geology'][1]), 0.0, 1.0);
+        $climateVariance = universe_clamp(universe_rand_float($type['climate_variance'][0], $type['climate_variance'][1]), 0.0, 1.0);
+
+        $gravityRatio = max(0.05, $massRatio / ($radiusRatio * $radiusRatio));
+
+        $temperatureSuitability = universe_gaussian($temperatureC, 15.0, 45.0);
+        $water = universe_clamp($water * (0.4 + $temperatureSuitability), 0.0, 1.0);
+        if ($temperatureC < -80.0 || $temperatureC > 120.0)
+        {
+                $water *= 0.3;
+        }
+
+        $atmosphere = universe_clamp($atmosphere * (0.5 + min($gravityRatio, 2.0) / 2.0), 0.0, 1.0);
+        $magnetosphere = universe_clamp($magnetosphere * (0.4 + min($gravityRatio, 2.5) / 2.5), 0.0, 1.0);
+
+        $pressureRatio = $pressureBase * (0.6 + min($gravityRatio, 3.0) / 3.0) + $atmosphere * 0.4;
+
+        $shielding = min(1.0, ($magnetosphere * 0.7) + ($atmosphere * 0.3));
+        $radiationHazard = min(1.0, ($flux / 2.5)) * (1.0 - $shielding);
+        $radiation = universe_clamp(1.0 - $radiationHazard, 0.0, 1.0);
+
+        $climateVariance = universe_clamp($climateVariance + ($eccentricity * 1.2), 0.0, 1.0);
+        if ($planetTypeKey === 'volcanic')
+        {
+                $climateVariance = universe_clamp($climateVariance + 0.2, 0.0, 1.0);
+                $geology = universe_clamp($geology + 0.1, 0.0, 1.0);
+        }
+        if ($planetTypeKey === 'gas_giant')
+        {
+                $resources = universe_clamp($resources + 0.1, 0.0, 1.0);
+        }
+
+        $biosignatures = 0.0;
+        if (in_array($planetTypeKey, array('terrestrial', 'super_earth', 'ocean', 'volcanic'), true))
+        {
+                $biosignatures = universe_clamp(
+                        ($temperatureSuitability * $water * $atmosphere * $radiation) + $type['biosignature_bias'],
+                        0.0,
+                        1.0
+                );
+                $biosignatures *= universe_clamp(1.0 - $climateVariance, 0.0, 1.0);
+        }
+
+        $environment = array(
+                'temperature' => $temperatureC,
+                'water' => $water,
+                'atmosphere' => $atmosphere,
+                'magnetosphere' => $magnetosphere,
+                'biosignatures' => $biosignatures,
+                'gravity' => universe_clamp($gravityRatio, 0.0, 3.0),
+                'pressure' => universe_clamp($pressureRatio, 0.0, 3.0),
+                'radiation' => $radiation,
+                'resources' => $resources,
+                'geology' => $geology,
+                'stellar_flux' => $flux,
+                'climate_variance' => $climateVariance
+        );
+
+        $analysis = Planet::analyzeHabitability($environment);
+        $totals['habitability_sum'] += $analysis['score'];
+        if ($analysis['habitable'])
+        {
+                $totals['habitable']++;
+        }
+
+        $countries = array();
+        if ($analysis['habitable'])
+        {
+                $countryTotal = universe_rand_int(2, 6);
+                for ($i = 0; $i < $countryTotal; $i++)
+                {
+                        $profile = universe_generate_country_profile($analysis['score'], $environment);
+                        $countryName = universe_generate_unique_name('country');
+                        $spawn = (int) round($profile['population_capacity'] * universe_rand_float(0.35, 0.75));
+                        $spawn = max(0, min($spawn, $profile['population_capacity']));
+                        $countries[] = array(
+                                'name' => $countryName,
+                                'profile' => $profile,
+                                'spawn_people' => $spawn
+                        );
+                        $totals['countries']++;
+                        $totals['population_capacity'] += $profile['population_capacity'];
+                }
+        }
+
+        $planet = array(
+                'name' => $planetName,
+                'mass' => $mass,
+                'radius' => $radius,
+                'environment' => $environment,
+                'orbit' => array(
+                        'semi_major_axis' => $semiMajorAxis,
+                        'period' => $periodSeconds,
+                        'eccentricity' => $eccentricity,
+                        'inclination_deg' => $inclination,
+                        'ascending_node_deg' => $ascendingNode,
+                        'argument_of_periapsis_deg' => $argumentOfPeriapsis,
+                        'phase' => $phase
+                ),
+                'metadata' => array(
+                        'type' => $planetTypeKey,
+                        'habitability_score' => $analysis['score']
+                )
+        );
+        if (!empty($countries))
+        {
+                $planet['countries'] = $countries;
+        }
+
+        return $planet;
+}
+
+function universe_select_planet_type (float $normalizedOrbit) : string
+{
+        $weights = array(
+                'dwarf' => 0.1,
+                'terrestrial' => 0.2,
+                'super_earth' => 0.15,
+                'ocean' => 0.1,
+                'volcanic' => 0.08,
+                'ice_giant' => 0.18,
+                'gas_giant' => 0.19
+        );
+        if ($normalizedOrbit < 0.2)
+        {
+                $weights['terrestrial'] += 0.1;
+                $weights['volcanic'] += 0.05;
+                $weights['gas_giant'] = max(0.02, $weights['gas_giant'] - 0.08);
+                $weights['ice_giant'] = max(0.02, $weights['ice_giant'] - 0.05);
+        }
+        elseif ($normalizedOrbit > 0.6)
+        {
+                $weights['gas_giant'] += 0.15;
+                $weights['ice_giant'] += 0.1;
+                $weights['dwarf'] += 0.05;
+                $weights['terrestrial'] = max(0.02, $weights['terrestrial'] - 0.1);
+                $weights['volcanic'] = max(0.02, $weights['volcanic'] - 0.05);
+        }
+        foreach ($weights as $key => $value)
+        {
+                $weights[$key] = max(0.01, $value);
+        }
+        return strval(universe_weighted_choice($weights));
+}
+
+function universe_generate_country_profile (float $habitabilityScore, array $environment) : array
+{
+        $score = universe_clamp($habitabilityScore, 0.0, 1.0);
+        $climateVariance = universe_clamp(floatval($environment['climate_variance'] ?? 0.0), 0.0, 1.0);
+        $resourceBase = universe_clamp(floatval($environment['resources'] ?? 0.5), 0.0, 1.0);
+
+        $infrastructure = universe_clamp($score + universe_rand_float(-0.15, 0.2), 0.2, 0.98);
+        $technology = universe_clamp($score + universe_rand_float(-0.1, 0.25), 0.2, 0.98);
+        $resources = universe_clamp($resourceBase + universe_rand_float(-0.1, 0.2), 0.2, 1.0);
+        $stability = universe_clamp($score + universe_rand_float(-0.2, 0.2) - ($climateVariance * 0.3), 0.15, 0.98);
+        $adaptation = universe_clamp($score + universe_rand_float(-0.05, 0.25), 0.2, 1.0);
+
+        $populationCapacity = (int) round(universe_rand_float(0.6, 1.4) * 1000000 * max(0.3, $score));
+        $populationCapacity = max(50000, $populationCapacity);
+        $developmentRate = universe_clamp(1.0 + $score * 2.5 + universe_rand_float(-0.2, 1.0), 0.5, 5.0);
+
+        return array(
+                'infrastructure' => $infrastructure,
+                'technology' => $technology,
+                'resources' => $resources,
+                'stability' => $stability,
+                'population_capacity' => $populationCapacity,
+                'development_rate' => $developmentRate,
+                'starting_food' => $populationCapacity * universe_rand_float(0.4, 0.9),
+                'starting_materials' => $populationCapacity * universe_rand_float(0.2, 0.6),
+                'starting_wealth' => $populationCapacity * universe_rand_float(0.1, 0.5),
+                'adaptation' => $adaptation,
+                'immortality_chance' => universe_clamp(universe_rand_float(0.0, $score * 0.2), 0.0, 0.2)
+        );
+}
+
 function universe_print_summary (Universe $universe) : void
 {
         echo "Simulation completed (" . $universe->getTicks() . " ticks)." . PHP_EOL;
@@ -247,7 +886,32 @@ function universe_print_summary (Universe $universe) : void
                                         continue;
                                 }
                                 $summary = $planet->getPopulationSummary();
-                                echo "    Planet: {$planetName} | Habitability: " . round($summary['habitability'], 2) . " | Population: " . $summary['population'] . PHP_EOL;
+                                $classification = ucfirst($summary['classification'] ?? 'unknown');
+                                $habitability = round($summary['habitability'], 2);
+                                $countryCount = $summary['countries'];
+                                $line = "    Planet: {$planetName} | Class: {$classification} | Habitability: {$habitability} | Population: " . $summary['population'];
+                                if ($countryCount > 0)
+                                {
+                                        $line .= " | Countries: {$countryCount}";
+                                }
+                                $factors = $summary['factors'] ?? array();
+                                if (is_array($factors) && !empty($factors))
+                                {
+                                        arsort($factors);
+                                        $topFactors = array_slice(array_keys($factors), 0, 2);
+                                        $factorLabels = array();
+                                        foreach ($topFactors as $factorKey)
+                                        {
+                                                $value = $factors[$factorKey];
+                                                $label = ucfirst(str_replace('_', ' ', strval($factorKey)));
+                                                $factorLabels[] = $label . ':' . round($value, 2);
+                                        }
+                                        if (!empty($factorLabels))
+                                        {
+                                                $line .= ' | Drivers: ' . implode(', ', $factorLabels);
+                                        }
+                                }
+                                echo $line . PHP_EOL;
                                 foreach ($planet->getCountries() as $countryName => $country)
                                 {
                                         if (!($country instanceof Country))
@@ -274,34 +938,39 @@ function universe_print_usage () : void
         echo "  php universe.php start [--delta=3600] [--interval=1] [--auto-steps=1] [--socket=path] [--pid-file=path] [--no-daemonize]" . PHP_EOL;
         echo "  php universe.php run-once [--steps=10] [--delta=3600]" . PHP_EOL;
         echo "  php universe.php help" . PHP_EOL;
-}
-
-$arguments = $_SERVER['argv'] ?? array();
-array_shift($arguments);
-$rawCommand = null;
-if (!empty($arguments) && !str_starts_with($arguments[0], '--'))
-{
-        $rawCommand = array_shift($arguments);
-}
-$options = universe_parse_options($arguments);
-$command = $rawCommand !== null ? UniverseCommand::fromString($rawCommand) : UniverseCommand::Start;
-
-if ($rawCommand !== null && $command === null)
-{
-        echo "Unknown command '{$rawCommand}'." . PHP_EOL;
-        universe_print_usage();
-        exit(1);
+        echo PHP_EOL . "Generation options:" . PHP_EOL;
+        echo "  --seed=<int>                Use a deterministic RNG seed for the generated universe" . PHP_EOL;
+        echo "  --galaxies=<int>            Override the number of galaxies generated" . PHP_EOL;
+        echo "  --systems-per-galaxy=<int>  Target system count per galaxy before variance" . PHP_EOL;
+        echo "  --planets-per-system=<int>  Target planet count per system before variance" . PHP_EOL;
 }
 
 switch ($command ?? UniverseCommand::Start)
 {
         case UniverseCommand::Start:
+                $deltaTime = isset($options['delta']) ? floatval((string)$options['delta']) : 3600.0;
+                if ($deltaTime <= 0)
+                {
+                        Utility::write('Delta time of ' . $deltaTime . ' seconds supplied; the daemon will reuse it without clamping.', LOG_WARNING, L_CONSOLE);
+                }
+                $loopInterval = isset($options['interval']) ? floatval((string)$options['interval']) : 1.0;
+                if ($loopInterval < 0)
+                {
+                        Utility::write('Loop interval cannot be negative; using 0 to run as fast as possible.', LOG_WARNING, L_CONSOLE);
+                        $loopInterval = 0.0;
+                }
+                $autoSteps = isset($options['auto-steps']) ? intval((string)$options['auto-steps']) : 1;
+                if ($autoSteps <= 0)
+                {
+                        Utility::write('Auto-steps must be greater than zero; using 1.', LOG_WARNING, L_CONSOLE);
+                        $autoSteps = 1;
+                }
                 $daemonOptions = array(
                         'socket' => $options['socket'] ?? (__DIR__ . '/runtime/universe.sock'),
                         'pid_file' => $options['pid-file'] ?? (__DIR__ . '/runtime/universe.pid'),
-                        'delta_time' => isset($options['delta']) ? max(1.0, floatval((string)$options['delta'])) : 3600.0,
-                        'loop_interval' => isset($options['interval']) ? max(0.1, floatval((string)$options['interval'])) : 1.0,
-                        'auto_steps' => isset($options['auto-steps']) ? max(1, intval((string)$options['auto-steps'])) : 1
+                        'delta_time' => $deltaTime,
+                        'loop_interval' => $loopInterval,
+                        'auto_steps' => $autoSteps
                 );
                 $daemon = new UniverseDaemon($simulator, $daemonOptions);
                 $shouldExit = empty($options['no-daemonize']) && $daemon->daemonize();
@@ -323,7 +992,11 @@ switch ($command ?? UniverseCommand::Start)
 
         case UniverseCommand::RunOnce:
                 $steps = isset($options['steps']) ? max(1, intval((string)$options['steps'])) : 10;
-                $deltaTime = isset($options['delta']) ? max(1.0, floatval((string)$options['delta'])) : 3600.0;
+                $deltaTime = isset($options['delta']) ? floatval((string)$options['delta']) : 3600.0;
+                if ($deltaTime <= 0)
+                {
+                        Utility::write('Run-once delta of ' . $deltaTime . ' seconds supplied; executing without clamping.', LOG_WARNING, L_CONSOLE);
+                }
                 $simulator->run($steps, $deltaTime);
                 universe_print_summary($universe);
                 break;

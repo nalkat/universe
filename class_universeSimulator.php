@@ -159,6 +159,9 @@ class UniverseSimulator
                                 'position' => $planet->getPosition(),
                                 'velocity' => $planet->getVelocity(),
                                 'habitability' => $planet->getHabitabilityScore(),
+                                'classification' => $planet->getHabitabilityClassification(),
+                                'environment' => $planet->getEnvironmentSnapshot(),
+                                'habitability_factors' => $planet->getHabitabilityFactors(),
                                 'population' => $planet->getPopulationSummary()
                         );
                 }

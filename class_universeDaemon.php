@@ -21,8 +21,9 @@ class UniverseDaemon
                 $this->socketPath = $options['socket'] ?? (__DIR__ . '/runtime/universe.sock');
                 $this->pidFile = $options['pid_file'] ?? (__DIR__ . '/runtime/universe.pid');
                 $this->deltaTime = floatval($options['delta_time'] ?? 3600.0);
-                $this->loopInterval = max(0.1, floatval($options['loop_interval'] ?? 1.0));
-                $this->autoSteps = max(1, intval($options['auto_steps'] ?? 1));
+                $this->loopInterval = max(0.0, floatval($options['loop_interval'] ?? 1.0));
+                $autoSteps = intval($options['auto_steps'] ?? 1);
+                $this->autoSteps = ($autoSteps > 0) ? $autoSteps : 1;
                 $this->clients = array();
                 $this->running = false;
                 $this->server = null;

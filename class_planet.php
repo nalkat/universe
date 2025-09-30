@@ -8,6 +8,8 @@ class Planet extends SystemObject
         private $environment;
         private $countries;
         private $habitabilityScore;
+        private $habitabilityFactors;
+        private $habitabilityClass;
 
         public function __construct (string $name, float $mass = 0.0, float $radius = 0.0, ?array $position = null, ?array $velocity = null)
         {
@@ -21,10 +23,19 @@ class Planet extends SystemObject
                         'water' => 0.0,
                         'atmosphere' => 0.0,
                         'magnetosphere' => 0.0,
-                        'biosignatures' => 0.0
+                        'biosignatures' => 0.0,
+                        'gravity' => 0.0,
+                        'pressure' => 0.0,
+                        'radiation' => 0.0,
+                        'resources' => 0.0,
+                        'geology' => 0.0,
+                        'stellar_flux' => 1.0,
+                        'climate_variance' => 0.0
                 );
                 $this->countries = array();
                 $this->habitabilityScore = 0.0;
+                $this->habitabilityFactors = array();
+                $this->habitabilityClass = 'barren';
         }
 
         public function setAtmosphere (array $composition) : void
@@ -53,12 +64,27 @@ class Planet extends SystemObject
                 {
                         if (!array_key_exists($key, $environment)) continue;
                         $incoming = $environment[$key];
-                        if (in_array($key, array('temperature'), true))
+                        if ($key === 'temperature')
                         {
                                 $this->environment[$key] = floatval($incoming);
                                 continue;
                         }
-                        $this->environment[$key] = $this->normalizeFraction($incoming);
+                        if ($key === 'stellar_flux')
+                        {
+                                $this->environment[$key] = max(0.0, floatval($incoming));
+                                continue;
+                        }
+                        if ($key === 'gravity' || $key === 'pressure')
+                        {
+                                $this->environment[$key] = max(0.0, floatval($incoming));
+                                continue;
+                        }
+                        if ($key === 'climate_variance')
+                        {
+                                $this->environment[$key] = self::normalizeFraction($incoming);
+                                continue;
+                        }
+                        $this->environment[$key] = self::normalizeFraction($incoming);
                 }
                 $this->updateHabitabilityScore();
         }
@@ -73,9 +99,24 @@ class Planet extends SystemObject
                 return $this->habitabilityScore;
         }
 
+        public function getHabitabilityFactors () : array
+        {
+                return $this->habitabilityFactors;
+        }
+
+        public function getHabitabilityClassification () : string
+        {
+                return $this->habitabilityClass;
+        }
+
         public function isReadyForCivilization () : bool
         {
                 return ($this->habitable && ($this->habitabilityScore >= 0.6));
+        }
+
+        public function getEnvironmentSnapshot () : array
+        {
+                return $this->environment;
         }
 
         public function registerCountry (Country $country) : void
@@ -127,7 +168,9 @@ class Planet extends SystemObject
                 return array(
                         'population' => $population,
                         'countries' => count($this->countries),
-                        'habitability' => $this->habitabilityScore
+                        'habitability' => $this->habitabilityScore,
+                        'classification' => $this->habitabilityClass,
+                        'factors' => $this->habitabilityFactors
                 );
         }
 
@@ -211,10 +254,12 @@ class Planet extends SystemObject
                 }
                 $temperatureShock = min(150.0, $relativeSpeed * 0.01 * $intensity);
                 $this->environment['temperature'] += $temperatureShock;
-                foreach (array('water', 'atmosphere', 'magnetosphere', 'biosignatures') as $key)
+                foreach (array('water', 'atmosphere', 'magnetosphere', 'biosignatures', 'resources', 'geology', 'pressure') as $key)
                 {
                         $this->environment[$key] = max(0.0, $this->environment[$key] * (1.0 - $intensity * 0.4));
                 }
+                $this->environment['radiation'] = max(0.0, $this->environment['radiation'] * (1.0 - $intensity * 0.25));
+                $this->environment['gravity'] = max(0.0, min(1.0, $this->environment['gravity'] * (1.0 - $intensity * 0.1)));
                 $this->updateHabitabilityScore();
                 foreach ($this->countries as $country)
                 {
@@ -230,32 +275,126 @@ class Planet extends SystemObject
                 );
         }
 
-        private function normalizeFraction ($value) : float
+        private static function normalizeFraction ($value) : float
         {
                 return max(0.0, min(1.0, floatval($value)));
         }
 
+        private static function gaussianScore (float $value, float $ideal, float $spread) : float
+        {
+                if ($spread <= 0)
+                {
+                        return ($value === $ideal) ? 1.0 : 0.0;
+                }
+                $delta = $value - $ideal;
+                $exponent = -($delta * $delta) / (2.0 * $spread * $spread);
+                return max(0.0, min(1.0, exp($exponent)));
+        }
+
         private function updateHabitabilityScore () : void
         {
-                $temperatureScore = 0.0;
-                $temperature = $this->environment['temperature'];
-                if ($temperature >= -50 && $temperature <= 70)
-                {
-                        $temperatureScore = 1.0 - (abs($temperature - 15) / 85);
-                        $temperatureScore = max(0.0, min(1.0, $temperatureScore));
-                }
-                $scores = array(
-                        $temperatureScore,
-                        $this->environment['water'],
-                        $this->environment['atmosphere'],
-                        $this->environment['magnetosphere'],
-                        $this->environment['biosignatures']
+                $analysis = self::analyzeHabitability($this->environment);
+                $this->habitabilityScore = $analysis['score'];
+                $this->habitable = $analysis['habitable'];
+                $this->habitabilityFactors = $analysis['factors'];
+                $this->habitabilityClass = $analysis['classification'];
+        }
+
+        public static function analyzeHabitability (array $environment) : array
+        {
+                $defaults = array(
+                        'temperature' => 0.0,
+                        'water' => 0.0,
+                        'atmosphere' => 0.0,
+                        'magnetosphere' => 0.0,
+                        'biosignatures' => 0.0,
+                        'gravity' => 0.0,
+                        'pressure' => 0.0,
+                        'radiation' => 0.0,
+                        'resources' => 0.0,
+                        'geology' => 0.0,
+                        'stellar_flux' => 1.0,
+                        'climate_variance' => 0.0
                 );
-                $this->habitabilityScore = array_sum($scores) / count($scores);
-                if ($this->habitabilityScore >= 0.6)
+                $env = array_merge($defaults, $environment);
+
+                $temperatureScore = self::gaussianScore($env['temperature'], 15.0, 45.0);
+                $fluxScore = self::gaussianScore($env['stellar_flux'], 1.0, 0.6);
+                $gravityScore = self::gaussianScore($env['gravity'], 1.0, 0.35);
+                $pressureScore = self::gaussianScore($env['pressure'], 1.0, 0.5);
+                $radiationScore = $env['radiation'];
+                $waterScore = $env['water'];
+                $atmosphereScore = $env['atmosphere'];
+                $magnetosphereScore = $env['magnetosphere'];
+                $biosignaturesScore = $env['biosignatures'];
+                $resourceScore = $env['resources'];
+                $geologyScore = $env['geology'];
+                $climateScore = 1.0 - self::normalizeFraction($env['climate_variance']);
+
+                $weights = array(
+                        'temperature' => 0.20,
+                        'water' => 0.12,
+                        'atmosphere' => 0.12,
+                        'magnetosphere' => 0.08,
+                        'biosignatures' => 0.10,
+                        'gravity' => 0.08,
+                        'pressure' => 0.06,
+                        'radiation' => 0.08,
+                        'resources' => 0.06,
+                        'geology' => 0.05,
+                        'stellar_flux' => 0.05,
+                        'climate' => 0.05
+                );
+
+                $factors = array(
+                        'temperature' => $temperatureScore,
+                        'water' => $waterScore,
+                        'atmosphere' => $atmosphereScore,
+                        'magnetosphere' => $magnetosphereScore,
+                        'biosignatures' => $biosignaturesScore,
+                        'gravity' => $gravityScore,
+                        'pressure' => $pressureScore,
+                        'radiation' => $radiationScore,
+                        'resources' => $resourceScore,
+                        'geology' => $geologyScore,
+                        'stellar_flux' => $fluxScore,
+                        'climate' => $climateScore
+                );
+
+                $score = 0.0;
+                foreach ($factors as $name => $value)
                 {
-                        $this->habitable = true;
+                        $weight = $weights[$name] ?? 0.0;
+                        $score += $weight * max(0.0, min(1.0, $value));
                 }
+
+                $score = max(0.0, min(1.0, $score));
+                $habitable = ($score >= 0.62) && ($temperatureScore > 0.2) && ($waterScore > 0.2) && ($atmosphereScore > 0.2);
+
+                $classification = 'barren';
+                if ($score >= 0.85)
+                {
+                        $classification = 'lush';
+                }
+                elseif ($score >= 0.75)
+                {
+                        $classification = 'temperate';
+                }
+                elseif ($score >= 0.62)
+                {
+                        $classification = 'marginal';
+                }
+                elseif ($score >= 0.45)
+                {
+                        $classification = 'hostile';
+                }
+
+                return array(
+                        'score' => $score,
+                        'habitable' => $habitable,
+                        'classification' => $classification,
+                        'factors' => $factors
+                );
         }
 
         private function updateOrbit (float $deltaTime) : void

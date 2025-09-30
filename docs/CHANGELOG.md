@@ -15,3 +15,9 @@
 - Introduced a Tkinter desktop control panel to run simulator commands without relying on the console-only workflow.
 - Ensured settlement dependencies load before cities so simulator bootstrapping no longer triggers fatal errors.
 - Automatically create required runtime and logging directories when launching the simulator.
+- Removed PHP execution time and memory limits so the simulator can freely scale to massive procedurally generated worlds.
+- Procedurally generate galaxies, stellar systems, and planets at launch with reproducible seeds and CLI controls for galaxy,
+  system, and planet counts.
+- Added multi-factor planetary habitability scoring, classification labels, and richer summary output that highlights the
+  environmental drivers supporting or undermining each world.
+- Increased the default galaxy, system, and planet counts so each run spawns thousands of unique worlds, and left run/daemon delta values unconstrained for high-frequency experimentation.

@@ -31,6 +31,10 @@ class UniverseGUI(tk.Tk):
         self.socket_path = tk.StringVar(value=str(self.project_root / "runtime" / "universe.sock"))
         self.pid_file_path = tk.StringVar(value=str(self.project_root / "runtime" / "universe.pid"))
         self.foreground = tk.BooleanVar(value=True)
+        self.seed = tk.StringVar()
+        self.galaxies = tk.StringVar()
+        self.systems_per_galaxy = tk.StringVar()
+        self.planets_per_system = tk.StringVar()
 
         self._output_queue: "queue.Queue[str]" = queue.Queue()
         self._worker: threading.Thread | None = None
@@ -76,6 +80,21 @@ class UniverseGUI(tk.Tk):
         ttk.Label(daemon_frame, text="PID File:").grid(row=2, column=0, sticky=tk.W, padx=(8, 6), pady=4)
         ttk.Entry(daemon_frame, textvariable=self.pid_file_path, width=48).grid(row=2, column=1, columnspan=3, sticky=tk.EW, pady=4)
         ttk.Checkbutton(daemon_frame, text="Stay in foreground", variable=self.foreground).grid(row=3, column=0, columnspan=4, sticky=tk.W, padx=8, pady=(4, 8))
+
+        generation_frame = ttk.LabelFrame(control_frame, text="Generation Options")
+        generation_frame.grid(row=3, column=0, columnspan=3, pady=(12, 0), sticky=tk.EW)
+        for column in range(4):
+            generation_frame.columnconfigure(column, weight=1)
+
+        ttk.Label(generation_frame, text="Seed:").grid(row=0, column=0, sticky=tk.W, padx=(8, 6), pady=4)
+        ttk.Entry(generation_frame, textvariable=self.seed, width=12).grid(row=0, column=1, sticky=tk.W, pady=4)
+        ttk.Label(generation_frame, text="Galaxies:").grid(row=0, column=2, sticky=tk.W, padx=(12, 6), pady=4)
+        ttk.Entry(generation_frame, textvariable=self.galaxies, width=8).grid(row=0, column=3, sticky=tk.W, pady=4)
+
+        ttk.Label(generation_frame, text="Systems/Galaxy:").grid(row=1, column=0, sticky=tk.W, padx=(8, 6), pady=4)
+        ttk.Entry(generation_frame, textvariable=self.systems_per_galaxy, width=12).grid(row=1, column=1, sticky=tk.W, pady=4)
+        ttk.Label(generation_frame, text="Planets/System:").grid(row=1, column=2, sticky=tk.W, padx=(12, 6), pady=4)
+        ttk.Entry(generation_frame, textvariable=self.planets_per_system, width=12).grid(row=1, column=3, sticky=tk.W, pady=4)
 
         button_frame = ttk.Frame(self)
         button_frame.pack(side=tk.TOP, fill=tk.X, padx=12, pady=(0, 12))
@@ -140,6 +159,15 @@ class UniverseGUI(tk.Tk):
                 args.append(f"--pid-file={pid_file}")
             if self.foreground.get():
                 args.append("--no-daemonize")
+
+        if seed := self.seed.get().strip():
+            args.append(f"--seed={seed}")
+        if galaxies := self.galaxies.get().strip():
+            args.append(f"--galaxies={galaxies}")
+        if systems := self.systems_per_galaxy.get().strip():
+            args.append(f"--systems-per-galaxy={systems}")
+        if planets := self.planets_per_system.get().strip():
+            args.append(f"--planets-per-system={planets}")
         return args
 
     def _execute_command(self, command: Iterable[str]) -> None:

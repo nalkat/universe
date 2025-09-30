@@ -6,7 +6,10 @@
 - [x] Improve the universe simulator executable to orchestrate subobject ticks.
 - [x] Document readiness criteria for population spawning.
 - [x] Introduce a blueprint-driven bootstrapper that wires galaxies, systems, planets, and countries together.
+- [x] Procedurally generate galaxies, stellar systems, and planets with configurable seeds and object-count targets.
+- [x] Lift tick-length clamps so delta experimentation can venture into sub-second or extreme regimes.
 - [x] Model resilience/adaptation loops so populations learn from famine and disasters.
+- [x] Implement multi-factor planetary habitability analysis and classification to surface colonization priorities.
 - [x] Establish material, chemical, and taxonomy scaffolding for future matter simulations.
 - [x] Flesh out plant, animal, and insect behaviours for ecological modelling.
 - [x] Create settlement and housing infrastructure classes to host emerging populations.
