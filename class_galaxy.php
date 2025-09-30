@@ -225,13 +225,19 @@ class Galaxy
                         if (isset($planetSpec['orbit']) && is_array($planetSpec['orbit']))
                         {
                                 $orbit = $planetSpec['orbit'];
+                                $inclination = $this->parseOrbitAngle($orbit, 'inclination');
+                                $ascendingNode = $this->parseOrbitAngle($orbit, 'ascending_node');
+                                $argumentOfPeriapsis = $this->parseOrbitAngle($orbit, 'argument_of_periapsis');
                                 $system->addPlanet(
                                         $planet,
                                         $primaryStar,
                                         floatval($orbit['semi_major_axis'] ?? 0.0),
                                         floatval($orbit['period'] ?? 1.0),
                                         floatval($orbit['eccentricity'] ?? 0.0),
-                                        floatval($orbit['phase'] ?? 0.0)
+                                        floatval($orbit['phase'] ?? 0.0),
+                                        $inclination,
+                                        $ascendingNode,
+                                        $argumentOfPeriapsis
                                 );
                         }
                         else
@@ -256,6 +262,20 @@ class Galaxy
                         }
                 }
                 return $system;
+        }
+
+        private function parseOrbitAngle (array $orbit, string $key) : float
+        {
+                if (isset($orbit[$key]))
+                {
+                        return floatval($orbit[$key]);
+                }
+                $degKey = $key . '_deg';
+                if (isset($orbit[$degKey]))
+                {
+                        return deg2rad(floatval($orbit[$degKey]));
+                }
+                return 0.0;
         }
 
         public function getSystems () : array

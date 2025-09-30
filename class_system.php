@@ -95,12 +95,22 @@ class System
                 $this->registerObject($object);
         }
 
-        public function addPlanet (Planet $planet, ?SystemObject $focus = null, ?float $semiMajorAxis = null, ?float $period = null, float $eccentricity = 0.0, float $phase = 0.0) : void
+        public function addPlanet (
+                Planet $planet,
+                ?SystemObject $focus = null,
+                ?float $semiMajorAxis = null,
+                ?float $period = null,
+                float $eccentricity = 0.0,
+                float $phase = 0.0,
+                float $inclination = 0.0,
+                float $ascendingNode = 0.0,
+                float $argumentOfPeriapsis = 0.0
+        ) : void
         {
                 $this->registerObject($planet);
                 if (($focus instanceof SystemObject) && ($semiMajorAxis !== null) && ($period !== null))
                 {
-                        if ($planet->setOrbit($focus, $semiMajorAxis, $period, $eccentricity, $phase))
+                        if ($planet->setOrbit($focus, $semiMajorAxis, $period, $eccentricity, $phase, $inclination, $ascendingNode, $argumentOfPeriapsis))
                         {
                                 Utility::write(
                                         $planet->getName() . " orbit registered around " . $focus->getName(),
