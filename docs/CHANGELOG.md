@@ -11,3 +11,5 @@
 - Defined material, chemical, ecological, and settlement scaffolding to classify non-sentient matter and living habitats.
 - Expanded structural modelling with adaptive habitats, experimental nests, and burrows that capture natural engineering successes and failures.
 - Built a hierarchy inspector command for the console so operators can navigate galaxies, systems, planets, and populations while the daemon runs.
+- Modernized `universe.php` to leverage PHP 8.3 enum-based command parsing and stricter type handling.
+- Introduced a Tkinter desktop control panel to run simulator commands without relying on the console-only workflow.

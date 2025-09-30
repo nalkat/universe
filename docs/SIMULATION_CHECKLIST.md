@@ -12,4 +12,6 @@
 - [x] Create settlement and housing infrastructure classes to host emerging populations.
 - [x] Prototype adaptive habitats (nests, burrows, emergent shelters) that can fail, learn, and evolve alongside their builders.
 - [x] Deliver an operator console view to inspect galaxies, systems, planets, and civilizations in real time.
+- [x] Ship a desktop control panel that orchestrates common simulator commands without the console.
+- [ ] Apply a bespoke visual theme and artwork pipeline for the desktop control panel.
 - [ ] Stress-test habitat experimentation loops across multi-season environmental scenarios.

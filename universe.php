@@ -1,4 +1,16 @@
-<?php // 7.3.0-dev
+<?php declare(strict_types=1); // Updated for PHP 8.3.6
+
+enum UniverseCommand: string
+{
+        case Start = 'start';
+        case RunOnce = 'run-once';
+        case Help = 'help';
+
+        public static function fromString(string $value): ?self
+        {
+                return self::tryFrom(strtolower($value));
+        }
+}
 
 require_once __DIR__ . "/telemetry/class_telemetry.php";
 require_once __DIR__ . "/config.php";
@@ -165,12 +177,16 @@ $blueprint = array(
 
 $simulator->bootstrap($blueprint);
 
+/**
+ * @param string[] $arguments
+ * @return array<string, bool|string>
+ */
 function universe_parse_options (array $arguments) : array
 {
         $options = array();
         foreach ($arguments as $argument)
         {
-                if (strpos($argument, '--') !== 0)
+                if (!str_starts_with($argument, '--'))
                 {
                         continue;
                 }
@@ -179,9 +195,9 @@ function universe_parse_options (array $arguments) : array
                 {
                         continue;
                 }
-                if (strpos($trimmed, '=') !== false)
+                if (str_contains($trimmed, '='))
                 {
-                        list($key, $value) = explode('=', $trimmed, 2);
+                        [$key, $value] = explode('=', $trimmed, 2);
                 }
                 else
                 {
@@ -248,22 +264,30 @@ function universe_print_usage () : void
 
 $arguments = $_SERVER['argv'] ?? array();
 array_shift($arguments);
-$command = 'start';
-if (!empty($arguments) && strpos($arguments[0], '--') !== 0)
+$rawCommand = null;
+if (!empty($arguments) && !str_starts_with($arguments[0], '--'))
 {
-        $command = strtolower(array_shift($arguments));
+        $rawCommand = array_shift($arguments);
 }
 $options = universe_parse_options($arguments);
+$command = $rawCommand !== null ? UniverseCommand::fromString($rawCommand) : UniverseCommand::Start;
 
-switch ($command)
+if ($rawCommand !== null && $command === null)
 {
-        case 'start':
+        echo "Unknown command '{$rawCommand}'." . PHP_EOL;
+        universe_print_usage();
+        exit(1);
+}
+
+switch ($command ?? UniverseCommand::Start)
+{
+        case UniverseCommand::Start:
                 $daemonOptions = array(
                         'socket' => $options['socket'] ?? (__DIR__ . '/runtime/universe.sock'),
                         'pid_file' => $options['pid-file'] ?? (__DIR__ . '/runtime/universe.pid'),
-                        'delta_time' => isset($options['delta']) ? max(1.0, floatval($options['delta'])) : 3600.0,
-                        'loop_interval' => isset($options['interval']) ? max(0.1, floatval($options['interval'])) : 1.0,
-                        'auto_steps' => isset($options['auto-steps']) ? max(1, intval($options['auto-steps'])) : 1
+                        'delta_time' => isset($options['delta']) ? max(1.0, floatval((string)$options['delta'])) : 3600.0,
+                        'loop_interval' => isset($options['interval']) ? max(0.1, floatval((string)$options['interval'])) : 1.0,
+                        'auto_steps' => isset($options['auto-steps']) ? max(1, intval((string)$options['auto-steps'])) : 1
                 );
                 $daemon = new UniverseDaemon($simulator, $daemonOptions);
                 $shouldExit = empty($options['no-daemonize']) && $daemon->daemonize();
@@ -283,21 +307,16 @@ switch ($command)
                 $daemon->run();
                 break;
 
-        case 'run-once':
-                $steps = isset($options['steps']) ? max(1, intval($options['steps'])) : 10;
-                $deltaTime = isset($options['delta']) ? max(1.0, floatval($options['delta'])) : 3600.0;
+        case UniverseCommand::RunOnce:
+                $steps = isset($options['steps']) ? max(1, intval((string)$options['steps'])) : 10;
+                $deltaTime = isset($options['delta']) ? max(1.0, floatval((string)$options['delta'])) : 3600.0;
                 $simulator->run($steps, $deltaTime);
                 universe_print_summary($universe);
                 break;
 
-        case 'help':
+        case UniverseCommand::Help:
                 universe_print_usage();
                 break;
-
-        default:
-                echo "Unknown command '{$command}'." . PHP_EOL;
-                universe_print_usage();
-                exit(1);
 }
 
 ?>

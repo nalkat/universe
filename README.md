@@ -22,15 +22,10 @@ the console, including the new interactive shell mode.
 ```
 php tools/universe_console.php status
 php tools/universe_console.php snapshot
-<<<<<<< HEAD
 php tools/universe_console.php hierarchy --depth=4
 php tools/universe_console.php advance --steps=5 --delta=1800
 php tools/universe_console.php shutdown
 php tools/universe_console.php repl           # stay connected and run multiple commands
-=======
-php tools/universe_console.php advance --steps=5 --delta=1800
-php tools/universe_console.php shutdown
->>>>>>> main
 ```
 
 Pass `--no-daemonize` to `universe.php start` to run the service in the foreground (useful
@@ -40,6 +35,20 @@ when developing locally). To run a single batch of steps and print a summary, us
 ```
 php universe.php run-once --steps=5 --delta=7200
 ```
+
+## Desktop control panel
+
+The `tools/universe_gui.py` script offers a lightweight Tkinter interface for running
+`universe.php` commands without relying on a terminal. Launch it with:
+
+```
+python3 tools/universe_gui.py
+```
+
+Use the "Run Once" mode to execute batch simulations and review the summarized output
+in the integrated log pane, or switch to "Start Daemon" to manage a foreground daemon
+instance with custom socket and PID file paths. The GUI keeps the command history in
+view so operators can iterate quickly while we work toward a fully art-directed theme.
 
 ## Matter and ecology scaffolding
 
