@@ -12,6 +12,7 @@ class Person extends Life
         private $senescenceStartYears;
         private $agingInterval;
         private $agingAccumulator;
+        private $mortalityModel;
 
         public function __construct (string $name, ?Country $homeCountry = null, array $traits = array())
         {
@@ -27,6 +28,15 @@ class Person extends Life
                 $this->senescenceStartYears = max(25.0, min($this->lifeExpectancyYears, floatval($traits['senescence_years'] ?? 65.0)));
                 $this->agingInterval = max(3600.0, floatval($traits['aging_interval'] ?? 86400.0));
                 $this->agingAccumulator = 0.0;
+                $this->mortalityModel = strtolower(trim(strval($traits['mortality'] ?? 'finite')));
+                if ($this->mortalityModel === '')
+                {
+                        $this->mortalityModel = 'finite';
+                }
+                if (in_array($this->mortalityModel, array('immortal', 'ageless', 'eternal'), true))
+                {
+                        $this->setTrait('immortal', true);
+                }
                 if ($homeCountry instanceof Country)
                 {
                         $this->setHomeCountry($homeCountry);
@@ -212,7 +222,7 @@ class Person extends Life
                 $this->modifyHealth(-$damage);
                 if ($this->hunger >= 2.0)
                 {
-                        $this->setHealth(0.0);
+                        $this->kill('starvation');
                 }
         }
 
@@ -226,6 +236,7 @@ class Person extends Life
 
         private function applyAging (float $elapsedSeconds) : void
         {
+                if ($this->isImmortal()) return;
                 $ageYears = $this->age / 31557600.0;
                 if ($ageYears < $this->senescenceStartYears) return;
                 $span = max(1.0, $this->lifeExpectancyYears - $this->senescenceStartYears);
@@ -239,7 +250,35 @@ class Person extends Life
                 }
                 if ($ageYears >= ($this->lifeExpectancyYears * 1.35))
                 {
-                        $this->setHealth(0.0);
+                        $this->kill('senescence');
+                }
+        }
+
+        public function kill (string $cause = 'unknown') : void
+        {
+                $wasAlive = $this->isAlive();
+                parent::kill($cause);
+                if ($wasAlive && !$this->isAlive() && $this->job instanceof Job)
+                {
+                        $job = $this->job;
+                        $this->job = null;
+                        $job->removeWorker($this);
+                }
+        }
+
+        public function getMortalityModel () : string
+        {
+                return $this->mortalityModel;
+        }
+
+        public function sufferTrauma (float $severity, string $cause) : void
+        {
+                $severity = max(0.0, floatval($severity));
+                if ($severity <= 0) return;
+                $this->modifyHealth(-$severity);
+                if (!$this->isAlive())
+                {
+                        $this->kill($cause);
                 }
         }
 }

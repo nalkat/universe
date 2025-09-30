@@ -199,6 +199,37 @@ class Planet extends SystemObject
                 }
         }
 
+        public function onImpact (SystemObject $impactor, float $impactEnergy, float $relativeSpeed) : void
+        {
+                if ($impactor === $this) return;
+                $planetMass = max(1.0, $this->getMass());
+                $specificEnergy = $impactEnergy / $planetMass;
+                $intensity = min(1.0, log10(1.0 + max(0.0, $specificEnergy)) / 6.0);
+                if ($intensity <= 0)
+                {
+                        return;
+                }
+                $temperatureShock = min(150.0, $relativeSpeed * 0.01 * $intensity);
+                $this->environment['temperature'] += $temperatureShock;
+                foreach (array('water', 'atmosphere', 'magnetosphere', 'biosignatures') as $key)
+                {
+                        $this->environment[$key] = max(0.0, $this->environment[$key] * (1.0 - $intensity * 0.4));
+                }
+                $this->updateHabitabilityScore();
+                foreach ($this->countries as $country)
+                {
+                        if ($country instanceof Country)
+                        {
+                                $country->sufferDisaster($intensity, 'impact by ' . $impactor->getName());
+                        }
+                }
+                Utility::write(
+                        $this->getName() . ' endured an impact from ' . $impactor->getName() . ' (intensity ' . number_format($intensity, 2) . ')',
+                        LOG_INFO,
+                        L_CONSOLE
+                );
+        }
+
         private function normalizeFraction ($value) : float
         {
                 return max(0.0, min(1.0, floatval($value)));

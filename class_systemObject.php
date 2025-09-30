@@ -13,6 +13,8 @@ class SystemObject
         protected $metadata;
         protected $parentSystem;
         protected $age;
+        protected $destroyed;
+        protected $destructionReason;
 
         public function __construct (string $name, float $mass = 0.0, float $radius = 0.0, ?array $position = null, ?array $velocity = null)
         {
@@ -25,6 +27,8 @@ class SystemObject
                 $this->metadata = array();
                 $this->parentSystem = null;
                 $this->age = floatval(0);
+                $this->destroyed = false;
+                $this->destructionReason = null;
         }
 
         protected function sanitizeVector (?array $vector) : array
@@ -135,6 +139,7 @@ class SystemObject
 
         public function applyAcceleration (array $acceleration, float $deltaTime) : void
         {
+                if ($this->destroyed) return;
                 if ($deltaTime <= 0) return;
                 $acceleration = $this->sanitizeVector($acceleration);
                 foreach ($this->velocity as $axis => $value)
@@ -145,6 +150,7 @@ class SystemObject
 
         public function tick (float $deltaTime = 1.0) : void
         {
+                if ($this->destroyed) return;
                 if ($deltaTime <= 0) return;
                 foreach ($this->position as $axis => $value)
                 {
@@ -184,6 +190,28 @@ class SystemObject
         public function isBoundToSystem () : bool
         {
                 return ($this->parentSystem instanceof System);
+        }
+
+        public function isDestroyed () : bool
+        {
+                return $this->destroyed;
+        }
+
+        public function destroy (string $reason = 'unknown') : void
+        {
+                if ($this->destroyed) return;
+                $this->destroyed = true;
+                $this->destructionReason = Utility::cleanse_string($reason);
+        }
+
+        public function getDestructionReason () : ?string
+        {
+                return $this->destructionReason;
+        }
+
+        public function onImpact (SystemObject $impactor, float $impactEnergy, float $relativeSpeed) : void
+        {
+                // Default implementation is intentionally empty; subclasses can override.
         }
 
         public function distanceTo (SystemObject $object) : float

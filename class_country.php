@@ -16,6 +16,7 @@ class Country
         private $birthAccumulator;
         private $unrestAccumulator;
         private $populationSeedTimer;
+        private $immortalityChance;
 
         public function __construct (string $name, Planet $planet, array $profile = array())
         {
@@ -39,6 +40,7 @@ class Country
                 $this->birthAccumulator = 0.0;
                 $this->unrestAccumulator = 0.0;
                 $this->populationSeedTimer = 0.0;
+                $this->immortalityChance = $this->sanitizeFraction($profile['immortality_chance'] ?? 0.0);
                 $this->planet->registerCountry($this);
                 $this->initializeEconomy();
         }
@@ -159,7 +161,8 @@ class Country
                         $name = ($namingStrategy === null)
                                 ? $this->generateCitizenName()
                                 : strval($namingStrategy($this->population + $i + 1, $this));
-                        $person = new Person($name, $this);
+                        $traits = $this->generateCitizenTraits();
+                        $person = new Person($name, $this, $traits);
                         $this->people[] = $person;
                         $created[] = $person;
                 }
@@ -271,6 +274,21 @@ class Country
         {
                 $index = $this->population + 1;
                 return $this->name . " Citizen " . $index;
+        }
+
+        private function generateCitizenTraits () : array
+        {
+                $traits = array();
+                if ($this->immortalityChance > 0.0)
+                {
+                        $roll = mt_rand() / mt_getrandmax();
+                        if ($roll <= $this->immortalityChance)
+                        {
+                                $traits['mortality'] = 'immortal';
+                                $traits['immortal'] = true;
+                        }
+                }
+                return $traits;
         }
 
         private function initializeEconomy () : void
@@ -451,26 +469,94 @@ class Country
                 }
         }
 
-        private function applyCasualties (int $count, string $cause) : void
+        private function applyCasualties (int $count, string $cause) : int
         {
-                if ($count <= 0) return;
+                if ($count <= 0) return 0;
                 $total = count($this->people);
-                if ($total <= 0) return;
+                if ($total <= 0) return 0;
                 $count = min($count, $total);
                 $indices = array_rand($this->people, $count);
                 if (!is_array($indices))
                 {
                         $indices = array($indices);
                 }
+                $losses = 0;
                 foreach ($indices as $index)
                 {
                         $person = $this->people[$index];
-                        if ($person instanceof Person)
+                        if (($person instanceof Person) && $person->isAlive())
                         {
-                                $person->setHealth(0.0);
+                                $person->kill($cause);
+                                $losses++;
                         }
                 }
-                Utility::write($this->name . " lost $count citizens to $cause", LOG_INFO, L_CONSOLE);
+                if ($losses > 0)
+                {
+                        $this->pruneDeadCitizens();
+                        Utility::write($this->name . " lost $losses citizens to $cause", LOG_INFO, L_CONSOLE);
+                }
+                return $losses;
+        }
+
+        public function sufferDisaster (float $intensity, string $cause) : array
+        {
+                $intensity = max(0.0, min(1.0, floatval($intensity)));
+                if ($intensity <= 0)
+                {
+                        return array('casualties' => 0, 'infrastructure_loss' => 0.0, 'stability_loss' => 0.0);
+                }
+                $stabilityLoss = min(0.9, $intensity * 0.35);
+                $infrastructureLoss = min(0.9, $intensity * 0.4);
+                $technologyLoss = min(0.9, $intensity * 0.25);
+                $this->stability = $this->sanitizeFraction($this->stability - $stabilityLoss);
+                $this->infrastructure = $this->sanitizeFraction($this->infrastructure - $infrastructureLoss);
+                $this->technology = $this->sanitizeFraction($this->technology - $technologyLoss);
+                $resourceLossFactor = min(0.95, $intensity * 0.6);
+                foreach ($this->resourceStockpiles as $resource => $amount)
+                {
+                        $this->resourceStockpiles[$resource] = max(0.0, $amount * (1.0 - $resourceLossFactor));
+                }
+                $casualtyTarget = intval(round($this->population * min(0.95, $intensity * 0.45)));
+                $casualties = $this->applyCasualties($casualtyTarget, $cause);
+                if ($casualties <= 0)
+                {
+                        $this->pruneDeadCitizens();
+                }
+                $injury = $intensity * 0.2;
+                if ($injury > 0)
+                {
+                        foreach ($this->people as $person)
+                        {
+                                if ($person instanceof Person)
+                                {
+                                        $person->sufferTrauma($injury * 0.5, $cause . ' injuries');
+                                }
+                        }
+                }
+                Utility::write(
+                        $this->name . " suffered a disaster from $cause (intensity " . number_format($intensity, 2) . ")",
+                        LOG_INFO,
+                        L_CONSOLE
+                );
+                return array(
+                        'casualties' => $casualties,
+                        'infrastructure_loss' => $infrastructureLoss,
+                        'stability_loss' => $stabilityLoss
+                );
+        }
+
+        private function pruneDeadCitizens () : void
+        {
+                $alive = array();
+                foreach ($this->people as $person)
+                {
+                        if (($person instanceof Person) && $person->isAlive())
+                        {
+                                $alive[] = $person;
+                        }
+                }
+                $this->people = $alive;
+                $this->population = count($this->people);
         }
 }
 ?>
