@@ -273,6 +273,7 @@ class UniverseDaemon
                                                 'ping' => 'Check daemon responsiveness',
                                                 'status' => 'Summarize current universe statistics',
                                                 'snapshot' => 'Return the latest cached snapshot of the universe',
+                                                'hierarchy' => 'Inspect galaxies, systems, planets, countries, and optional people',
                                                 'advance' => 'Advance the simulation immediately (accepts steps, delta_time)',
                                                 'shutdown' => 'Stop the universe daemon gracefully'
                                         )
@@ -299,6 +300,12 @@ class UniverseDaemon
                                         'snapshot' => $snapshot,
                                         'steps' => $steps,
                                         'delta_time' => $delta
+                                ));
+
+                        case 'hierarchy':
+                                $summary = $this->buildHierarchySummary($args);
+                                return $this->wrapResponse(true, array(
+                                        'hierarchy' => $summary
                                 ));
 
                         case 'shutdown':
@@ -382,6 +389,348 @@ class UniverseDaemon
                         'delta_time' => $this->deltaTime,
                         'loop_interval' => $this->loopInterval
                 );
+        }
+
+        private function buildHierarchySummary (array $args) : array
+        {
+                $depth = max(1, intval($args['depth'] ?? 3));
+                $includePeople = $this->valueToBool($args['include_people'] ?? false);
+                $selectors = $this->parseHierarchyPath($args['path'] ?? null);
+
+                $focus = array();
+                foreach (array('galaxy', 'system', 'planet', 'country', 'person') as $type)
+                {
+                        if (isset($selectors[$type]))
+                        {
+                                $focus[$type] = $selectors[$type];
+                        }
+                }
+
+                $summary = array(
+                        'tick' => $this->simulator->getUniverse()->getTicks(),
+                        'depth' => $depth,
+                        'depth_levels' => array(
+                                1 => 'galaxies',
+                                2 => 'systems',
+                                3 => 'planets',
+                                4 => 'countries',
+                                5 => 'people'
+                        ),
+                        'include_people' => $includePeople,
+                        'focus' => $focus,
+                        'galaxies' => array()
+                );
+
+                $found = array(
+                        'galaxy' => !isset($focus['galaxy']),
+                        'system' => !isset($focus['system']),
+                        'planet' => !isset($focus['planet']),
+                        'country' => !isset($focus['country']),
+                        'person' => !isset($focus['person'])
+                );
+
+                $universe = $this->simulator->getUniverse();
+                $galaxies = $universe->getGalaxies();
+                if (isset($focus['galaxy']))
+                {
+                        $galaxies = array();
+                        $targetGalaxy = $universe->getGalaxy($focus['galaxy']);
+                        if ($targetGalaxy instanceof Galaxy)
+                        {
+                                $galaxies[$targetGalaxy->name] = $targetGalaxy;
+                                $found['galaxy'] = true;
+                        }
+                }
+
+                $systemFocus = $focus['system'] ?? null;
+                $planetFocus = $focus['planet'] ?? null;
+                $countryFocus = $focus['country'] ?? null;
+                $personFocus = $focus['person'] ?? null;
+                $collectPeople = ($includePeople || $personFocus !== null);
+
+                foreach ($galaxies as $galaxy)
+                {
+                        if (!($galaxy instanceof Galaxy))
+                        {
+                                continue;
+                        }
+
+                        $galaxyName = $galaxy->name ?? null;
+                        if ($galaxyName !== null && isset($focus['galaxy']) && ($galaxyName === $focus['galaxy']))
+                        {
+                                $found['galaxy'] = true;
+                        }
+
+                        $galaxyEntry = array(
+                                'name' => $galaxyName,
+                                'type' => get_class($galaxy),
+                                'system_count' => 0,
+                                'systems' => array()
+                        );
+
+                        $systems = $galaxy->getSystems();
+                        $galaxyEntry['system_count'] = count($systems);
+
+                        if ($depth >= 2)
+                        {
+                                if ($systemFocus !== null)
+                                {
+                                        $targetSystem = $galaxy->getSystem($systemFocus);
+                                        $systems = array();
+                                        if ($targetSystem instanceof System)
+                                        {
+                                                $systems[$targetSystem->getName()] = $targetSystem;
+                                                $found['system'] = true;
+                                        }
+                                }
+
+                                foreach ($systems as $system)
+                                {
+                                        if (!($system instanceof System))
+                                        {
+                                                continue;
+                                        }
+
+                                        $systemEntry = array(
+                                                'name' => $system->getName(),
+                                                'propagation_mode' => $system->getPropagationMode(),
+                                                'object_count' => $system->countObjects(),
+                                                'planet_count' => count($system->getPlanets()),
+                                                'planets' => array()
+                                        );
+
+                                        if ($depth >= 3)
+                                        {
+                                                $planets = $system->getPlanets();
+                                                if ($planetFocus !== null)
+                                                {
+                                                        $planets = array();
+                                                        $targetPlanet = $system->getObject($planetFocus);
+                                                        if ($targetPlanet instanceof Planet)
+                                                        {
+                                                                $planets[$targetPlanet->getName()] = $targetPlanet;
+                                                                $found['planet'] = true;
+                                                        }
+                                                }
+
+                                                foreach ($planets as $planet)
+                                                {
+                                                        if (!($planet instanceof Planet))
+                                                        {
+                                                                continue;
+                                                        }
+
+                                                        $planetSummary = $planet->getPopulationSummary();
+                                                        $planetEntry = array(
+                                                                'name' => $planet->getName(),
+                                                                'type' => $planet->getType(),
+                                                                'habitability' => $planet->getHabitabilityScore(),
+                                                                'population' => $planetSummary['population'] ?? 0,
+                                                                'country_count' => $planetSummary['countries'] ?? count($planet->getCountries()),
+                                                                'countries' => array()
+                                                        );
+
+                                                        if ($depth >= 4)
+                                                        {
+                                                                $countries = $planet->getCountries();
+                                                                if ($countryFocus !== null)
+                                                                {
+                                                                        $countries = array();
+                                                                        $targetCountry = $planet->getCountry($countryFocus);
+                                                                        if ($targetCountry instanceof Country)
+                                                                        {
+                                                                                $countries[$targetCountry->getName()] = $targetCountry;
+                                                                                $found['country'] = true;
+                                                                        }
+                                                                }
+
+                                                                foreach ($countries as $country)
+                                                                {
+                                                                        if (!($country instanceof Country))
+                                                                        {
+                                                                                continue;
+                                                                        }
+
+                                                                        $countryEntry = array(
+                                                                                'name' => $country->getName(),
+                                                                                'population' => $country->getPopulation(),
+                                                                                'capacity' => $country->getPopulationCapacity(),
+                                                                                'development' => $country->getDevelopmentScore(),
+                                                                                'adaptation' => $country->getAdaptationLevel(),
+                                                                                'resources' => array(
+                                                                                        'food' => $country->getResourceStockpile('food'),
+                                                                                        'materials' => $country->getResourceStockpile('materials'),
+                                                                                        'wealth' => $country->getResourceStockpile('wealth')
+                                                                                ),
+                                                                                'jobs' => array()
+                                                                        );
+
+                                                                        $jobs = $country->getJobs();
+                                                                        foreach ($jobs as $job)
+                                                                        {
+                                                                                if (!($job instanceof Job))
+                                                                                {
+                                                                                        continue;
+                                                                                }
+                                                                                $countryEntry['jobs'][] = array(
+                                                                                        'name' => $job->getName(),
+                                                                                        'category' => $job->getCategory(),
+                                                                                        'capacity' => $job->getCapacity(),
+                                                                                        'workers' => count($job->getWorkers())
+                                                                                );
+                                                                        }
+
+                                                                        if ($collectPeople)
+                                                                        {
+                                                                                $people = $country->getPeople();
+                                                                                if ($personFocus !== null)
+                                                                                {
+                                                                                        $filtered = array();
+                                                                                        foreach ($people as $person)
+                                                                                        {
+                                                                                                if (!($person instanceof Person))
+                                                                                                {
+                                                                                                        continue;
+                                                                                                }
+                                                                                                if ($person->getName() === $personFocus)
+                                                                                                {
+                                                                                                        $filtered[] = $person;
+                                                                                                        $found['person'] = true;
+                                                                                                        break;
+                                                                                                }
+                                                                                        }
+                                                                                        $people = $filtered;
+                                                                                }
+
+                                                                                if ($includePeople || ($personFocus !== null && !empty($people)))
+                                                                                {
+                                                                                        $peopleEntries = array();
+                                                                                        foreach ($people as $person)
+                                                                                        {
+                                                                                                if (!($person instanceof Person))
+                                                                                                {
+                                                                                                        continue;
+                                                                                                }
+                                                                                                if ($personFocus !== null && $person->getName() === $personFocus)
+                                                                                                {
+                                                                                                        $found['person'] = true;
+                                                                                                }
+
+                                                                                                $personEntry = array(
+                                                                                                        'name' => $person->getName(),
+                                                                                                        'alive' => $person->isAlive(),
+                                                                                                        'age' => $person->getAge(),
+                                                                                                        'health' => $person->getHealth(),
+                                                                                                        'hunger' => $person->getHungerLevel(),
+                                                                                                        'resilience' => $person->getResilience(),
+                                                                                                        'profession' => $person->getProfession()
+                                                                                                );
+
+                                                                                                $job = $person->getJob();
+                                                                                                if ($job instanceof Job)
+                                                                                                {
+                                                                                                        $personEntry['job'] = $job->getName();
+                                                                                                }
+
+                                                                                                $skills = $person->getSkills();
+                                                                                                if (!empty($skills))
+                                                                                                {
+                                                                                                        $personEntry['skills'] = $skills;
+                                                                                                }
+
+                                                                                                if (!$person->isAlive() && $person->getDeathReason() !== null)
+                                                                                                {
+                                                                                                        $personEntry['death_cause'] = $person->getDeathReason();
+                                                                                                }
+
+                                                                                                $peopleEntries[] = $personEntry;
+                                                                                        }
+
+                                                                                        if (!empty($peopleEntries))
+                                                                                        {
+                                                                                                $countryEntry['people'] = $peopleEntries;
+                                                                                        }
+                                                                                }
+                                                                        }
+
+                                                                        $planetEntry['countries'][] = $countryEntry;
+                                                                }
+                                                        }
+
+                                                        $systemEntry['planets'][] = $planetEntry;
+                                                }
+                                        }
+
+                                        $galaxyEntry['systems'][] = $systemEntry;
+                                }
+                        }
+
+                        $summary['galaxies'][] = $galaxyEntry;
+                }
+
+                foreach ($focus as $type => $name)
+                {
+                        if (array_key_exists($type, $found) && !$found[$type])
+                        {
+                                if (!isset($summary['missing']))
+                                {
+                                        $summary['missing'] = array();
+                                }
+                                $summary['missing'][$type] = $name;
+                        }
+                }
+
+                return $summary;
+        }
+
+        private function parseHierarchyPath (?string $path) : array
+        {
+                $result = array('segments' => array());
+                if ($path === null)
+                {
+                        return $result;
+                }
+
+                $trimmed = trim(strval($path));
+                if ($trimmed === '')
+                {
+                        return $result;
+                }
+
+                $segments = preg_split('/\s*\/\s*/', $trimmed, -1, PREG_SPLIT_NO_EMPTY);
+                foreach ($segments as $segment)
+                {
+                        $parts = explode(':', $segment, 2);
+                        if (count($parts) < 2)
+                        {
+                                continue;
+                        }
+                        $type = strtolower(trim($parts[0]));
+                        $name = Utility::cleanse_string($parts[1]);
+                        if ($name === '')
+                        {
+                                continue;
+                        }
+                        if (!in_array($type, array('galaxy', 'system', 'planet', 'country', 'person'), true))
+                        {
+                                continue;
+                        }
+                        $result[$type] = $name;
+                        $result['segments'][] = array('type' => $type, 'name' => $name);
+                }
+
+                return $result;
+        }
+
+        private function valueToBool ($value) : bool
+        {
+                if (is_bool($value))
+                {
+                        return $value;
+                }
+
+                $normalized = strtolower(trim(strval($value)));
+                return !in_array($normalized, array('', '0', 'false', 'no', 'off'), true);
         }
 
         private function shutdown () : void

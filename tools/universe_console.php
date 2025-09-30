@@ -8,6 +8,7 @@ function console_print_usage () : void
         echo "  php tools/universe_console.php status [--socket=path] [--json]" . PHP_EOL;
         echo "  php tools/universe_console.php snapshot [--socket=path] [--json]" . PHP_EOL;
         echo "  php tools/universe_console.php advance [--steps=1] [--delta=3600] [--socket=path] [--json]" . PHP_EOL;
+        echo "  php tools/universe_console.php hierarchy [--depth=3] [--path=selector] [--include-people=0] [--socket=path] [--json]" . PHP_EOL;
         echo "  php tools/universe_console.php shutdown [--socket=path] [--json]" . PHP_EOL;
         echo "  php tools/universe_console.php repl [--socket=path] [--json]" . PHP_EOL;
         echo "  php tools/universe_console.php help" . PHP_EOL;
@@ -138,6 +139,21 @@ function console_execute_command (string $command, array $options, string $socke
                                 'steps' => $steps,
                                 'delta_time' => $delta
                         );
+                        break;
+
+                case 'hierarchy':
+                        $depth = isset($commandOptions['depth']) ? max(1, intval($commandOptions['depth'])) : 3;
+                        $path = isset($commandOptions['path']) ? strval($commandOptions['path']) : null;
+                        $includePeopleOption = $commandOptions['include-people'] ?? ($commandOptions['include_people'] ?? false);
+                        $includePeople = console_option_is_truthy($includePeopleOption);
+                        $args = array(
+                                'depth' => $depth,
+                                'include_people' => $includePeople
+                        );
+                        if ($path !== null && $path !== '')
+                        {
+                                $args['path'] = $path;
+                        }
                         break;
 
                 default:
@@ -302,6 +318,7 @@ switch ($command)
         case 'snapshot':
         case 'shutdown':
         case 'ping':
+        case 'hierarchy':
         case 'advance':
                 $success = console_execute_command($command, $options, $socketPath);
                 if (!$success)

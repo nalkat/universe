@@ -11,4 +11,5 @@
 - [x] Flesh out plant, animal, and insect behaviours for ecological modelling.
 - [x] Create settlement and housing infrastructure classes to host emerging populations.
 - [x] Prototype adaptive habitats (nests, burrows, emergent shelters) that can fail, learn, and evolve alongside their builders.
+- [x] Deliver an operator console view to inspect galaxies, systems, planets, and civilizations in real time.
 - [ ] Stress-test habitat experimentation loops across multi-season environmental scenarios.

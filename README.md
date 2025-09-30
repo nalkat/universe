@@ -22,6 +22,7 @@ the console, including the new interactive shell mode.
 ```
 php tools/universe_console.php status
 php tools/universe_console.php snapshot
+php tools/universe_console.php hierarchy --depth=4
 php tools/universe_console.php advance --steps=5 --delta=1800
 php tools/universe_console.php shutdown
 php tools/universe_console.php repl           # stay connected and run multiple commands
@@ -46,3 +47,7 @@ The simulator now includes foundational classes for cataloguing matter and livin
 - `Taxonomy` offers reusable classification metadata to keep species aligned with their biological context.
 
 These classes provide the categorization framework required before the simulation begins generating complex civilizations.
+
+Use the `hierarchy` console command to explore the currently running universe. Adjust `--path` (for example,
+`galaxy:andromeda/system:sol`) and `--depth` to focus on specific regions, and add `--include-people=1` to surface individual
+citizens when needed.

@@ -25,6 +25,7 @@ php tools/universe_console.php snapshot      # summary of the hierarchical objec
 php tools/universe_console.php advance --steps=10 --delta=3600
 php tools/universe_console.php shutdown      # ask the daemon to terminate gracefully
 php tools/universe_console.php ping          # low-level health check
+php tools/universe_console.php hierarchy     # inspect galaxies/systems/planets/countries
 ```
 
 `advance` accepts the same `steps` and `delta` arguments as the daemon itself. The
@@ -49,6 +50,26 @@ Once inside the shell you can:
 Each command opens a short-lived connection, waits for the daemon response, and prints a
 human-readable table or JSON payload depending on the output mode. Errors are reported
 inline without terminating the console so you can correct typos and try again.
+
+## Exploring the object hierarchy
+
+Use the `hierarchy` command when you need a structured overview of the currently running
+simulation. By default the daemon returns galaxies, their systems, and the planets within
+each system. You can tailor the depth and focus:
+
+```bash
+# show galaxies, systems, planets, and country summaries
+php tools/universe_console.php hierarchy --depth=4
+
+# zoom in to a single system and include individual people
+php tools/universe_console.php hierarchy --path="galaxy:andromeda/system:sol" --include-people=1 --depth=5
+```
+
+`--path` accepts slash-separated selectors (`galaxy:<name>/system:<name>/planet:<name>/country:<name>/person:<name>`). The
+console normalizes names in the same way the simulation does, so you can use spaces or
+mixed case freely. Increase `--depth` to reveal deeper levels (galaxies → systems →
+planets → countries → people) and append `--json` to receive the raw payload for custom
+tooling.
 
 ## Troubleshooting
 
