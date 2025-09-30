@@ -10,3 +10,5 @@
 - [x] Establish material, chemical, and taxonomy scaffolding for future matter simulations.
 - [x] Flesh out plant, animal, and insect behaviours for ecological modelling.
 - [x] Create settlement and housing infrastructure classes to host emerging populations.
+- [x] Prototype adaptive habitats (nests, burrows, emergent shelters) that can fail, learn, and evolve alongside their builders.
+- [ ] Stress-test habitat experimentation loops across multi-season environmental scenarios.
