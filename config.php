@@ -19,6 +19,7 @@ Logger,/logger/class_logger.php
 Timer,/timer/class_timer.php
 Utility,/utility/class_utility.php
 Universe,/universe/class_universe.php
+UniverseSimulator,/universe/class_universeSimulator.php
 Galaxy,/universe/class_galaxy.php
 System,/universe/class_system.php
 SystemObject,/universe/class_systemObject.php
