@@ -1,6 +1,8 @@
 # Change Log
 
 ## [Unreleased]
+- Added per-planet timekeeping profiles with local day/year lengths and relative flow rates, surfaced via planet descriptions and simulator snapshots.
+- Rebased country and citizen simulation to local planetary time so hunger, recovery, and aging honor each world's cadence and expose life expectancy in local years.
 - Added narrative descriptions to celestial bodies and settlements to support richer UI labeling, including dynamic star, planet, and country summaries.
 - Modeled persistent planetary weather systems that cycle through climate-informed patterns and feed into each world's descriptive text.
 - Wove collaborative citizen backstories using shared country chronicles so every person now references their community and relationships.
@@ -24,3 +26,5 @@
 - Added multi-factor planetary habitability scoring, classification labels, and richer summary output that highlights the
   environmental drivers supporting or undermining each world.
 - Increased the default galaxy, system, and planet counts so each run spawns thousands of unique worlds, and left run/daemon delta values unconstrained for high-frequency experimentation.
+- Documented universal vs. planetary time units in `docs/TIMEKEEPING.md` so UI and telemetry consumers can interpret ages,
+  ticks, and longevity consistently.

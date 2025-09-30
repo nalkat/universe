@@ -15,6 +15,9 @@ class Planet extends SystemObject
         private $currentWeatherIndex;
         private $weatherTimer;
         private $climateProfile;
+        private $timekeeping;
+        private $lastLocalTickDuration;
+        private $lastUniversalTickDuration;
 
         public function __construct (string $name, float $mass = 0.0, float $radius = 0.0, ?array $position = null, ?array $velocity = null)
         {
@@ -46,6 +49,9 @@ class Planet extends SystemObject
                 $this->currentWeatherIndex = null;
                 $this->weatherTimer = 0.0;
                 $this->climateProfile = null;
+                $this->timekeeping = $this->generateTimekeepingProfile();
+                $this->lastLocalTickDuration = 0.0;
+                $this->lastUniversalTickDuration = 0.0;
                 $this->setDescription('A newly catalogued world awaiting survey data.');
         }
 
@@ -131,6 +137,216 @@ class Planet extends SystemObject
                 return $this->environment;
         }
 
+        public function setTimekeeping (array $profile) : void
+        {
+                $this->applyTimekeepingProfile($profile);
+                $this->refreshTemporalDependents();
+        }
+
+        public function getTimekeepingProfile () : array
+        {
+                $dayLocal = $this->getDayLengthSeconds(true);
+                $dayUniversal = $this->getDayLengthSeconds(false);
+                $hourLocal = $this->getHourLengthSeconds(true);
+                $hourUniversal = $this->getHourLengthSeconds(false);
+                $yearLocal = $this->getYearLengthSeconds(true);
+                $yearUniversal = $this->getYearLengthSeconds(false);
+                $hoursPerDay = max(1.0, floatval($this->timekeeping['hours_per_day'] ?? 24.0));
+                $dayCount = ($dayLocal > 0.0) ? ($yearLocal / $dayLocal) : 0.0;
+
+                return array(
+                        'relative_rate' => $this->getRelativeTimeRate(),
+                        'hours_per_day' => $hoursPerDay,
+                        'day_length_local_seconds' => $dayLocal,
+                        'day_length_seconds' => $dayUniversal,
+                        'hour_length_local_seconds' => $hourLocal,
+                        'hour_length_seconds' => $hourUniversal,
+                        'year_length_local_seconds' => $yearLocal,
+                        'year_length_seconds' => $yearUniversal,
+                        'year_length_days' => $dayCount,
+                        'last_tick' => $this->getLastTickDurations(),
+                        'summary' => $this->describeTimekeeping()
+                );
+        }
+
+        public function getRelativeTimeRate () : float
+        {
+                return max(0.05, floatval($this->timekeeping['relative_rate'] ?? 1.0));
+        }
+
+        public function getDayLengthSeconds (bool $local = false) : float
+        {
+                $dayLocal = floatval($this->timekeeping['day_length_local'] ?? 86400.0);
+                if ($local) return $dayLocal;
+                $rate = $this->getRelativeTimeRate();
+                return ($rate > 0.0) ? ($dayLocal / $rate) : $dayLocal;
+        }
+
+        public function getHourLengthSeconds (bool $local = false) : float
+        {
+                $hoursPerDay = max(1.0, floatval($this->timekeeping['hours_per_day'] ?? 24.0));
+                $daySeconds = $this->getDayLengthSeconds($local);
+                return $daySeconds / $hoursPerDay;
+        }
+
+        public function getYearLengthSeconds (bool $local = false) : float
+        {
+                $yearLocal = floatval($this->timekeeping['year_length_local'] ?? 31557600.0);
+                if ($local) return $yearLocal;
+                $rate = $this->getRelativeTimeRate();
+                return ($rate > 0.0) ? ($yearLocal / $rate) : $yearLocal;
+        }
+
+        public function convertUniversalToLocalSeconds (float $seconds) : float
+        {
+                if ($seconds <= 0.0) return 0.0;
+                return $seconds * $this->getRelativeTimeRate();
+        }
+
+        public function convertLocalToUniversalSeconds (float $seconds) : float
+        {
+                if ($seconds <= 0.0) return 0.0;
+                $rate = $this->getRelativeTimeRate();
+                return ($rate > 0.0) ? ($seconds / $rate) : $seconds;
+        }
+
+        public function getLastTickDurations () : array
+        {
+                return array(
+                        'universal_seconds' => $this->lastUniversalTickDuration,
+                        'local_seconds' => $this->lastLocalTickDuration
+                );
+        }
+
+        private function convertSecondsToLocalHours (float $seconds) : float
+        {
+                $hour = max(1.0, $this->getHourLengthSeconds(true));
+                return max(0.0, $seconds / $hour);
+        }
+
+        public function describeTimekeeping () : string
+        {
+                $dayUniversalHours = $this->getDayLengthSeconds(false) / 3600.0;
+                $hoursPerDay = max(1.0, floatval($this->timekeeping['hours_per_day'] ?? 24.0));
+                $yearDays = ($this->getDayLengthSeconds(true) > 0.0)
+                        ? ($this->getYearLengthSeconds(true) / $this->getDayLengthSeconds(true))
+                        : 0.0;
+                $universalYearDays = $this->getYearLengthSeconds(false) / 86400.0;
+                $rate = $this->getRelativeTimeRate();
+
+                $phrases = array();
+                $phrases[] = sprintf(
+                        'Local days last %s universal hours across %s local hours.',
+                        number_format($dayUniversalHours, 1),
+                        number_format($hoursPerDay, 1)
+                );
+                $phrases[] = sprintf(
+                        'A local year spans %s local days (~%s universal days).',
+                        number_format($yearDays, 1),
+                        number_format($universalYearDays, 1)
+                );
+                if (abs($rate - 1.0) < 0.01)
+                {
+                        $phrases[] = 'Time here flows at the simulator\'s standard rate.';
+                }
+                elseif ($rate > 1.0)
+                {
+                        $phrases[] = sprintf('Time here runs %sx faster than the universal frame.', number_format($rate, 2));
+                }
+                else
+                {
+                        $phrases[] = sprintf('Time here runs %sx slower than the universal frame.', number_format(1.0 / max(0.01, $rate), 2));
+                }
+                return implode(' ', $phrases);
+        }
+
+        private function generateTimekeepingProfile () : array
+        {
+                $hoursPerDay = max(12.0, min(40.0, (random_int(120, 360) / 10.0)));
+                $dayLengthLocal = $hoursPerDay * 3600.0;
+                $yearDays = max(60.0, min(900.0, random_int(120, 720)));
+                $yearLengthLocal = $dayLengthLocal * $yearDays;
+                $relativeRate = max(0.4, min(2.5, random_int(40, 200) / 100.0));
+
+                return $this->ensureTimekeepingConsistency(array(
+                        'relative_rate' => $relativeRate,
+                        'hours_per_day' => $hoursPerDay,
+                        'day_length_local' => $dayLengthLocal,
+                        'year_length_local' => $yearLengthLocal
+                ));
+        }
+
+        private function applyTimekeepingProfile (array $profile) : void
+        {
+                $current = $this->timekeeping ?? $this->generateTimekeepingProfile();
+                if (isset($profile['relative_rate']))
+                {
+                        $current['relative_rate'] = max(0.05, min(5.0, floatval($profile['relative_rate'])));
+                }
+                if (isset($profile['hours_per_day']))
+                {
+                        $current['hours_per_day'] = max(4.0, min(48.0, floatval($profile['hours_per_day'])));
+                }
+                if (isset($profile['day_length_local_seconds']) || isset($profile['day_length_local']))
+                {
+                        $value = $profile['day_length_local_seconds'] ?? $profile['day_length_local'];
+                        $current['day_length_local'] = max(3600.0, floatval($value));
+                }
+                elseif (isset($profile['day_length_seconds']))
+                {
+                        $seconds = max(3600.0, floatval($profile['day_length_seconds']));
+                        $rate = max(0.05, floatval($current['relative_rate'] ?? 1.0));
+                        $current['day_length_local'] = $seconds * $rate;
+                }
+                if (isset($profile['year_length_local_seconds']) || isset($profile['year_length_local']))
+                {
+                        $value = $profile['year_length_local_seconds'] ?? $profile['year_length_local'];
+                        $current['year_length_local'] = max(
+                                max(3600.0, $current['day_length_local'] ?? 86400.0) * 16.0,
+                                floatval($value)
+                        );
+                }
+                elseif (isset($profile['year_length_seconds']))
+                {
+                        $seconds = max(3600.0, floatval($profile['year_length_seconds']));
+                        $rate = max(0.05, floatval($current['relative_rate'] ?? 1.0));
+                        $current['year_length_local'] = max(
+                                max(3600.0, $current['day_length_local'] ?? 86400.0) * 16.0,
+                                $seconds * $rate
+                        );
+                }
+                $this->timekeeping = $this->ensureTimekeepingConsistency($current);
+        }
+
+        private function ensureTimekeepingConsistency (array $profile) : array
+        {
+                $profile['relative_rate'] = max(0.05, min(5.0, floatval($profile['relative_rate'] ?? 1.0)));
+                $dayLocal = max(3600.0, floatval($profile['day_length_local'] ?? 86400.0));
+                $hoursPerDay = max(4.0, min(48.0, floatval($profile['hours_per_day'] ?? 24.0)));
+                $yearLocal = max($dayLocal * 16.0, floatval($profile['year_length_local'] ?? ($dayLocal * 365.0)));
+                return array(
+                        'relative_rate' => $profile['relative_rate'],
+                        'hours_per_day' => $hoursPerDay,
+                        'day_length_local' => $dayLocal,
+                        'year_length_local' => $yearLocal
+                );
+        }
+
+        private function refreshTemporalDependents () : void
+        {
+                if (!empty($this->weatherSystems))
+                {
+                        $this->initializeWeatherSystems(true);
+                }
+                foreach ($this->countries as $country)
+                {
+                        if ($country instanceof Country)
+                        {
+                                $country->synchronizeWithPlanetTimekeeping();
+                        }
+                }
+        }
+
         public function registerCountry (Country $country) : void
         {
                 $name = $country->getName();
@@ -187,7 +403,7 @@ class Planet extends SystemObject
                         'name' => strval($current['name'] ?? 'weather system'),
                         'type' => strval($current['type'] ?? 'unknown'),
                         'intensity' => floatval($current['intensity'] ?? 0.0),
-                        'duration_hours' => ($duration > 0.0) ? ($duration / 3600.0) : 0.0,
+                        'duration_hours' => ($duration > 0.0) ? $this->convertSecondsToLocalHours($duration) : 0.0,
                         'progress' => $progress,
                         'narrative' => strval($current['summary'] ?? '')
                 );
@@ -221,8 +437,79 @@ class Planet extends SystemObject
                         'countries' => count($this->countries),
                         'habitability' => $this->habitabilityScore,
                         'classification' => $this->habitabilityClass,
-                        'factors' => $this->habitabilityFactors
+                        'factors' => $this->habitabilityFactors,
+                        'timekeeping' => $this->getTimekeepingProfile(),
+                        'longevity' => $this->summarizePopulationLongevity()
                 );
+        }
+
+        private function summarizePopulationLongevity () : array
+        {
+                $expectancies = array();
+                $senescence = array();
+                foreach ($this->countries as $country)
+                {
+                        if (!($country instanceof Country)) continue;
+                        foreach ($country->getPeople() as $person)
+                        {
+                                if (!($person instanceof Person)) continue;
+                                $expectancies[] = $person->getLifeExpectancyYears();
+                                $senescence[] = $person->getSenescenceStartYears();
+                        }
+                }
+                $yearLocal = $this->getYearLengthSeconds(true);
+                $yearDays = ($this->getDayLengthSeconds(true) > 0.0)
+                        ? ($yearLocal / $this->getDayLengthSeconds(true))
+                        : 0.0;
+                if (!empty($expectancies))
+                {
+                        $average = array_sum($expectancies) / count($expectancies);
+                        sort($expectancies);
+                        $min = reset($expectancies);
+                        $max = end($expectancies);
+                        $senescenceAverage = (!empty($senescence)) ? array_sum($senescence) / count($senescence) : null;
+                        return array(
+                                'basis' => 'observed',
+                                'life_expectancy_years' => $average,
+                                'life_expectancy_years_range' => array(
+                                        'min' => $min,
+                                        'max' => $max
+                                ),
+                                'senescence_start_years' => $senescenceAverage,
+                                'year_length_local_seconds' => $yearLocal,
+                                'year_length_seconds' => $this->getYearLengthSeconds(false),
+                                'year_length_days' => $yearDays
+                        );
+                }
+                list($expected, $senescenceStart) = $this->estimateBaseLongevity();
+                return array(
+                        'basis' => 'projection',
+                        'life_expectancy_years' => $expected,
+                        'senescence_start_years' => $senescenceStart,
+                        'year_length_local_seconds' => $yearLocal,
+                        'year_length_seconds' => $this->getYearLengthSeconds(false),
+                        'year_length_days' => $yearDays
+                );
+        }
+
+        private function estimateBaseLongevity () : array
+        {
+                $habitability = max(0.0, min(1.0, $this->habitabilityScore));
+                $profile = $this->describeClimate();
+                $variance = floatval($profile['variance'] ?? 0.0);
+                $rate = $this->getRelativeTimeRate();
+                $expected = 60.0 + ($habitability * 35.0) - ($variance * 12.0);
+                if ($rate < 1.0)
+                {
+                        $expected += (1.0 - $rate) * 6.0;
+                }
+                elseif ($rate > 1.0)
+                {
+                        $expected -= min(12.0, ($rate - 1.0) * 8.0);
+                }
+                $expected = max(30.0, min(120.0, $expected));
+                $senescence = max(20.0, min($expected - 4.0, $expected * (0.6 + $habitability * 0.2)));
+                return array($expected, $senescence);
         }
 
         public function getOrbit () : ?array
@@ -269,6 +556,10 @@ class Planet extends SystemObject
 
         public function tick (float $deltaTime = 1.0) : void
         {
+                $deltaTime = floatval($deltaTime);
+                $localDelta = $this->convertUniversalToLocalSeconds($deltaTime);
+                $this->lastUniversalTickDuration = max(0.0, $deltaTime);
+                $this->lastLocalTickDuration = max(0.0, $localDelta);
                 $useAnalyticOrbit = ($this->orbit !== null) && ($deltaTime > 0);
                 if ($useAnalyticOrbit)
                 {
@@ -287,7 +578,7 @@ class Planet extends SystemObject
                 {
                         parent::tick($deltaTime);
                 }
-                $this->advanceWeather($deltaTime);
+                $this->advanceWeather($localDelta);
                 foreach ($this->countries as $country)
                 {
                         $country->tick($deltaTime);
@@ -620,7 +911,7 @@ class Planet extends SystemObject
                         'name' => ucwords($choice),
                         'type' => $humidity,
                         'intensity' => $intensity,
-                        'duration' => $durationHours * 3600.0,
+                        'duration' => $durationHours * $this->getHourLengthSeconds(true),
                         'elapsed' => 0.0,
                         'summary' => ''
                 );
@@ -661,7 +952,7 @@ class Planet extends SystemObject
                 $biome = strtolower(strval($profile['biome_descriptor'] ?? 'terrain'));
                 $seasonalityDescriptor = $profile['seasonality_descriptor'] ?? 'changing skies';
                 $name = strtolower(strval($pattern['name'] ?? 'weather system'));
-                $durationHours = max(1.0, floatval(($pattern['duration'] ?? 0.0) / 3600.0));
+                $durationHours = max(1.0, $this->convertSecondsToLocalHours(floatval($pattern['duration'] ?? 0.0)));
                 $line = sprintf('%s %s channels %s over the %s for roughly %.1f hours.', ucfirst($intensityLabel), $name, $seasonalityDescriptor, $biome, $durationHours);
                 $life = trim(strval($profile['life_phrase'] ?? ''));
                 if ($life !== '')
@@ -712,7 +1003,7 @@ class Planet extends SystemObject
                 }
 
                 $this->weatherSystems[$this->currentWeatherIndex] = $current;
-                if ($this->weatherTimer >= 3600.0)
+                if ($this->weatherTimer >= $this->getHourLengthSeconds(true))
                 {
                         $this->weatherSystems[$this->currentWeatherIndex]['summary'] = $this->summarizeWeatherPattern($current);
                         $this->weatherTimer = 0.0;
@@ -758,7 +1049,8 @@ class Planet extends SystemObject
                 );
                 $weather = $this->getCurrentWeather();
                 $weatherLine = ($weather === null) ? '' : $weather['narrative'];
-                $segments = array($intro, $lifeLine, $resourceLine, $skyLine, $gravityLine, $habitabilityLine, $weatherLine);
+                $timeLine = $this->describeTimekeeping();
+                $segments = array($intro, $lifeLine, $resourceLine, $skyLine, $gravityLine, $habitabilityLine, $weatherLine, $timeLine);
                 $filtered = array();
                 foreach ($segments as $segment)
                 {

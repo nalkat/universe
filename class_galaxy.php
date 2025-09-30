@@ -218,6 +218,10 @@ class Galaxy
                         {
                                 $planet->setEnvironment($planetSpec['environment']);
                         }
+                        if (isset($planetSpec['timekeeping']) && is_array($planetSpec['timekeeping']))
+                        {
+                                $planet->setTimekeeping($planetSpec['timekeeping']);
+                        }
                         if (isset($planetSpec['habitable']))
                         {
                                 $planet->setHabitable((bool)$planetSpec['habitable']);

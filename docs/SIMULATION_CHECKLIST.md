@@ -9,6 +9,7 @@
 - [x] Procedurally generate galaxies, stellar systems, and planets with configurable seeds and object-count targets.
 - [x] Lift tick-length clamps so delta experimentation can venture into sub-second or extreme regimes.
 - [x] Model resilience/adaptation loops so populations learn from famine and disasters.
+- [x] Model relative time dilation per planet and ensure local days/years drive citizen hunger and aging.
 - [x] Implement multi-factor planetary habitability analysis and classification to surface colonization priorities.
 - [x] Seed climate-driven weather cycles and narrative descriptions for planets, countries, and citizens.
 - [x] Establish material, chemical, and taxonomy scaffolding for future matter simulations.

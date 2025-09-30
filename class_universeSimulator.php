@@ -161,6 +161,7 @@ class UniverseSimulator
                                 'habitability' => $planet->getHabitabilityScore(),
                                 'classification' => $planet->getHabitabilityClassification(),
                                 'environment' => $planet->getEnvironmentSnapshot(),
+                                'timekeeping' => $planet->getTimekeepingProfile(),
                                 'habitability_factors' => $planet->getHabitabilityFactors(),
                                 'population' => $planet->getPopulationSummary()
                         );

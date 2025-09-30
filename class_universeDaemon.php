@@ -621,10 +621,15 @@ class UniverseDaemon
                                                                                                         'name' => $person->getName(),
                                                                                                         'alive' => $person->isAlive(),
                                                                                                         'age' => $person->getAge(),
+                                                                                                        'age_years' => $person->getAgeInYears(),
                                                                                                         'health' => $person->getHealth(),
                                                                                                         'hunger' => $person->getHungerLevel(),
                                                                                                         'resilience' => $person->getResilience(),
-                                                                                                        'profession' => $person->getProfession()
+                                                                                                        'profession' => $person->getProfession(),
+                                                                                                        'life_expectancy_years' => $person->getLifeExpectancyYears(),
+                                                                                                        'life_expectancy_seconds' => $person->getLifeExpectancySeconds(),
+                                                                                                        'senescence_years' => $person->getSenescenceStartYears(),
+                                                                                                        'senescence_seconds' => $person->getSenescenceStartSeconds()
                                                                                                 );
 
                                                                                                 $job = $person->getJob();

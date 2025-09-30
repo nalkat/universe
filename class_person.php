@@ -12,6 +12,8 @@ class Person extends Life
         private $senescenceStartYears;
         private $agingInterval;
         private $agingAccumulator;
+        private $nutritionCadenceFactor;
+        private $agingCadenceFactor;
         private $mortalityModel;
         private $resilienceExperience;
         private $calmAccumulator;
@@ -28,10 +30,12 @@ class Person extends Life
                 $this->hunger = 0.25;
                 $this->dailyFoodNeed = max(0.1, floatval($traits['daily_food_need'] ?? 1.0));
                 $this->nutritionInterval = max(1.0, floatval($traits['nutrition_interval'] ?? 86400.0));
+                $this->nutritionCadenceFactor = max(0.1, $this->nutritionInterval / 86400.0);
                 $this->lifeExpectancyYears = max(35.0, floatval($traits['life_expectancy_years'] ?? 82.0));
                 $this->senescenceStartYears = max(25.0, min($this->lifeExpectancyYears, floatval($traits['senescence_years'] ?? 65.0)));
                 $this->agingInterval = max(3600.0, floatval($traits['aging_interval'] ?? 86400.0));
                 $this->agingAccumulator = 0.0;
+                $this->agingCadenceFactor = max(0.05, $this->agingInterval / 86400.0);
                 $this->mortalityModel = strtolower(trim(strval($traits['mortality'] ?? 'finite')));
                 $this->resilienceExperience = 0.0;
                 $this->calmAccumulator = 0.0;
@@ -53,17 +57,83 @@ class Person extends Life
                 {
                         $this->setHomeCountry($homeCountry);
                 }
+                else
+                {
+                        $this->synchronizeWithPlanetTimekeeping();
+                }
                 $this->addSkill('survival', 0.2);
         }
 
         public function setHomeCountry (?Country $country) : void
         {
                 $this->homeCountry = $country;
+                $this->synchronizeWithPlanetTimekeeping();
         }
 
         public function getHomeCountry () : ?Country
         {
                 return $this->homeCountry;
+        }
+
+        public function synchronizeWithPlanetTimekeeping () : void
+        {
+                $dayLength = $this->resolveLocalDayLengthSeconds();
+                $yearLength = $this->resolveLocalYearLengthSeconds();
+                $this->nutritionInterval = max(600.0, $dayLength * max(0.1, $this->nutritionCadenceFactor));
+                $this->agingInterval = max(3600.0, $dayLength * max(0.05, $this->agingCadenceFactor));
+                $this->agingAccumulator = min($this->agingAccumulator, $this->agingInterval);
+                $calmThreshold = $this->getCalmThresholdSeconds();
+                if ($calmThreshold > 0.0 && $this->calmAccumulator > $calmThreshold)
+                {
+                        $this->calmAccumulator = fmod($this->calmAccumulator, $calmThreshold);
+                }
+                $this->setTrait('nutrition_interval', $this->nutritionInterval);
+                $this->setTrait('aging_interval', $this->agingInterval);
+                $this->setTrait('local_year_seconds', $yearLength);
+        }
+
+        private function getHomePlanet () : ?Planet
+        {
+                if ($this->homeCountry instanceof Country)
+                {
+                        return $this->homeCountry->getPlanet();
+                }
+                return null;
+        }
+
+        private function resolveLocalDayLengthSeconds () : float
+        {
+                $planet = $this->getHomePlanet();
+                if ($planet instanceof Planet)
+                {
+                        return max(3600.0, $planet->getDayLengthSeconds(true));
+                }
+                return 86400.0;
+        }
+
+        private function resolveLocalYearLengthSeconds () : float
+        {
+                $planet = $this->getHomePlanet();
+                if ($planet instanceof Planet)
+                {
+                        return max($this->resolveLocalDayLengthSeconds(), $planet->getYearLengthSeconds(true));
+                }
+                return 31557600.0;
+        }
+
+        private function convertUniversalToLocalSeconds (float $seconds) : float
+        {
+                $planet = $this->getHomePlanet();
+                if ($planet instanceof Planet)
+                {
+                        return $planet->convertUniversalToLocalSeconds($seconds);
+                }
+                return $seconds;
+        }
+
+        private function getCalmThresholdSeconds () : float
+        {
+                return $this->resolveLocalDayLengthSeconds() * 7.0;
         }
 
         public function setProfession (?string $profession) : void
@@ -208,15 +278,19 @@ class Person extends Life
                 }
                 if ($deltaTime <= 0) return;
 
+                $localDelta = $this->convertUniversalToLocalSeconds($deltaTime);
+                if ($localDelta <= 0) return;
+
                 foreach ($this->skills as $skill)
                 {
-                        $skill->tick($deltaTime);
+                        $skill->tick($localDelta);
                 }
 
-                $hungerDrift = ($deltaTime / $this->nutritionInterval);
+                $hungerDrift = ($localDelta / $this->nutritionInterval);
                 $hungerDrift *= max(0.3, 1.0 - ($this->getResilience() * 0.25));
                 $this->hunger += $hungerDrift;
-                $foodNeeded = $this->dailyFoodNeed * ($deltaTime / 86400.0);
+                $dayLength = $this->resolveLocalDayLengthSeconds();
+                $foodNeeded = $this->dailyFoodNeed * (($dayLength > 0.0) ? ($localDelta / $dayLength) : 0.0);
                 $foodReceived = 0.0;
                 if ($this->homeCountry instanceof Country)
                 {
@@ -232,15 +306,15 @@ class Person extends Life
                 }
                 else
                 {
-                        $this->recoverHealth($deltaTime);
+                        $this->recoverHealth($localDelta);
                 }
-                $this->agingAccumulator += $deltaTime;
+                $this->agingAccumulator += $localDelta;
                 if ($this->agingAccumulator >= $this->agingInterval)
                 {
                         $this->applyAging($this->agingAccumulator);
                         $this->agingAccumulator = 0.0;
                 }
-                $this->processResilienceGrowth($deltaTime);
+                $this->processResilienceGrowth($localDelta);
         }
 
         private function satiate (float $consumed) : void
@@ -259,7 +333,8 @@ class Person extends Life
                 $resilience = $this->getResilience();
                 $hungerMultiplier = max(0.25, 1.0 - ($resilience * 0.4));
                 $this->hunger += $increase * $hungerMultiplier;
-                $timeFactor = max(0.1, $deltaTime / 86400.0);
+                $dayLength = $this->resolveLocalDayLengthSeconds();
+                $timeFactor = ($dayLength > 0.0) ? max(0.1, $deltaTime / $dayLength) : 0.1;
                 $damageMitigation = max(0.25, 1.0 - ($resilience * 0.65));
                 $damage = $increase * 0.12 * $timeFactor * $damageMitigation;
                 $this->modifyHealth(-$damage);
@@ -276,7 +351,8 @@ class Person extends Life
         private function recoverHealth (float $deltaTime) : void
         {
                 if ($this->hunger > 0.8) return;
-                $timeFactor = $deltaTime / 86400.0;
+                $dayLength = $this->resolveLocalDayLengthSeconds();
+                $timeFactor = ($dayLength > 0.0) ? ($deltaTime / $dayLength) : 0.0;
                 if ($timeFactor <= 0) return;
                 $recoveryBoost = 1.0 + ($this->getResilience() * 0.6);
                 $this->modifyHealth(0.02 * $timeFactor * $recoveryBoost);
@@ -285,12 +361,14 @@ class Person extends Life
         private function applyAging (float $elapsedSeconds) : void
         {
                 if ($this->isImmortal()) return;
-                $ageYears = $this->age / 31557600.0;
+                $yearLength = $this->resolveLocalYearLengthSeconds();
+                $localAge = $this->convertUniversalToLocalSeconds($this->age);
+                $ageYears = ($yearLength > 0.0) ? ($localAge / $yearLength) : 0.0;
                 if ($ageYears < $this->senescenceStartYears) return;
                 $span = max(1.0, $this->lifeExpectancyYears - $this->senescenceStartYears);
                 $excess = max(0.0, $ageYears - $this->senescenceStartYears);
                 $pressure = min(2.0, $excess / $span);
-                $timeFactor = $elapsedSeconds / 31557600.0;
+                $timeFactor = ($yearLength > 0.0) ? ($elapsedSeconds / $yearLength) : 0.0;
                 $damage = max(0.0, $pressure * 0.05 * $timeFactor);
                 if ($damage > 0.0)
                 {
@@ -317,6 +395,34 @@ class Person extends Life
         public function getMortalityModel () : string
         {
                 return $this->mortalityModel;
+        }
+
+        public function getAgeInYears () : float
+        {
+                $yearLength = $this->resolveLocalYearLengthSeconds();
+                if ($yearLength <= 0.0) return 0.0;
+                $localAge = $this->convertUniversalToLocalSeconds($this->age);
+                return $localAge / $yearLength;
+        }
+
+        public function getLifeExpectancyYears () : float
+        {
+                return $this->lifeExpectancyYears;
+        }
+
+        public function getLifeExpectancySeconds () : float
+        {
+                return $this->lifeExpectancyYears * $this->resolveLocalYearLengthSeconds();
+        }
+
+        public function getSenescenceStartYears () : float
+        {
+                return $this->senescenceStartYears;
+        }
+
+        public function getSenescenceStartSeconds () : float
+        {
+                return $this->senescenceStartYears * $this->resolveLocalYearLengthSeconds();
         }
 
         public function sufferTrauma (float $severity, string $cause) : void
@@ -356,9 +462,11 @@ class Person extends Life
                         return;
                 }
                 $this->calmAccumulator += $deltaTime;
-                if ($this->calmAccumulator >= 604800.0)
+                $calmThreshold = $this->getCalmThresholdSeconds();
+                if ($calmThreshold <= 0) return;
+                if ($this->calmAccumulator >= $calmThreshold)
                 {
-                        $periods = floor($this->calmAccumulator / 604800.0);
+                        $periods = floor($this->calmAccumulator / $calmThreshold);
                         if ($periods > 0)
                         {
                                 $decay = min(0.05, $periods * 0.01);
@@ -366,7 +474,7 @@ class Person extends Life
                                 {
                                         parent::reduceResilience($decay);
                                 }
-                                $this->calmAccumulator -= ($periods * 604800.0);
+                                $this->calmAccumulator -= ($periods * $calmThreshold);
                         }
                 }
         }

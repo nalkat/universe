@@ -77,6 +77,27 @@ references mentors, rivals, and shared community history. Access these strings v
 `SystemObject::getDescription()`, `Country::getDescription()`, and `Person::getBackstory()`
 to differentiate entries in upcoming UI layers.
 
+### Relative timekeeping and population longevity
+
+Every planet now maintains its own temporal frame describing how quickly local seconds
+pass relative to the simulator baseline, how long days and years last, and how those
+durations convert to universal seconds. Use `Planet::getTimekeepingProfile()` to inspect
+the relative rate, day and year lengths (in both local and universal units), and the
+most recent tick durations. `Country` and `Person` instances automatically translate
+incoming universal ticks into their planet's frame so hunger, recovery, training, and
+aging all respect local days and years.
+
+Citizen generation now derives life expectancy and senescence thresholds from the host
+planet's habitability, the country's development level, and the planet's temporal
+dilation. Access `Person::getAgeInYears()`, `Person::getLifeExpectancyYears()`, and
+`Person::getSenescenceStartYears()` to surface meaningful age and longevity data in
+snapshots or user interfaces. Planetary population summaries and daemon snapshots now
+include longevity projections alongside raw population counts so operators can answer
+"How long do these people live?" without manual conversions.
+
+For a deeper walkthrough—including how ticks map to universal seconds and how local
+years are resolved per planet—see [`docs/TIMEKEEPING.md`](docs/TIMEKEEPING.md).
+
 ## Desktop control panel
 
 The `tools/universe_gui.py` script offers a lightweight Tkinter interface for running

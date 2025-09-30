@@ -52,6 +52,7 @@ class Country
                 $this->planet->registerCountry($this);
                 $this->initializeEconomy();
                 $this->initializeLore();
+                $this->synchronizeWithPlanetTimekeeping();
         }
 
         public function getName () : string
@@ -62,6 +63,44 @@ class Country
         public function getPlanet () : Planet
         {
                 return $this->planet;
+        }
+
+        public function getLocalDayLengthSeconds () : float
+        {
+                return max(1.0, $this->planet->getDayLengthSeconds(true));
+        }
+
+        public function getLocalYearLengthSeconds () : float
+        {
+                return max($this->getLocalDayLengthSeconds(), $this->planet->getYearLengthSeconds(true));
+        }
+
+        public function getLocalHourLengthSeconds () : float
+        {
+                return max(1.0, $this->planet->getHourLengthSeconds(true));
+        }
+
+        private function getLocalWeekLengthSeconds () : float
+        {
+                return $this->getLocalDayLengthSeconds() * 7.0;
+        }
+
+        public function convertUniversalToLocalSeconds (float $seconds) : float
+        {
+                return $this->planet->convertUniversalToLocalSeconds($seconds);
+        }
+
+        public function synchronizeWithPlanetTimekeeping () : void
+        {
+                $day = $this->getLocalDayLengthSeconds();
+                $this->populationSeedTimer = min($this->populationSeedTimer, $day);
+                foreach ($this->people as $person)
+                {
+                        if ($person instanceof Person)
+                        {
+                                $person->synchronizeWithPlanetTimekeeping();
+                        }
+                }
         }
 
         public function getPopulation () : int
@@ -295,16 +334,28 @@ class Country
         public function tick (float $deltaTime = 1.0) : void
         {
                 if ($deltaTime <= 0) return;
-                $progress = $deltaTime * $this->developmentRate * 0.0001;
+                $localDelta = $this->convertUniversalToLocalSeconds($deltaTime);
+                if ($localDelta <= 0)
+                {
+                        foreach ($this->people as $person)
+                        {
+                                if ($person instanceof Person)
+                                {
+                                        $person->tick($deltaTime);
+                                }
+                        }
+                        return;
+                }
+                $progress = $localDelta * $this->developmentRate * 0.0001;
                 $this->improveInfrastructure($progress);
                 $this->improveTechnology($progress * 0.9);
                 $this->improveResources($progress * 0.8);
                 $this->improveStability($progress * 0.85);
                 $this->rebalanceEmployment();
-                $this->runEconomy($deltaTime);
-                $this->investInAdaptation($deltaTime);
-                $this->advancePopulation($deltaTime);
-                $this->processAdaptation($deltaTime);
+                $this->runEconomy($localDelta);
+                $this->investInAdaptation($localDelta);
+                $this->advancePopulation($localDelta);
+                $this->processAdaptation($localDelta);
                 $alive = array();
                 foreach ($this->people as $person)
                 {
@@ -350,7 +401,42 @@ class Country
                         $variance = ((mt_rand() / mt_getrandmax()) - 0.5) * 0.2;
                         $traits['resilience'] = max(0.0, min(1.0, $baseResilience + $variance));
                 }
+                $longevity = $this->estimateCitizenLongevity();
+                if ($longevity !== null)
+                {
+                        $lifeSpread = max(2.0, $longevity['expectancy'] * 0.1);
+                        $lifeRoll = ((mt_rand() / mt_getrandmax()) - 0.5) * $lifeSpread;
+                        $lifeExpectancy = max(24.0, $longevity['expectancy'] + $lifeRoll);
+                        $senescenceSpread = max(1.0, $longevity['senescence'] * 0.08);
+                        $senescenceRoll = ((mt_rand() / mt_getrandmax()) - 0.5) * $senescenceSpread;
+                        $senescenceAge = max(18.0, min($lifeExpectancy - 2.0, $longevity['senescence'] + $senescenceRoll));
+                        $traits['life_expectancy_years'] = $lifeExpectancy;
+                        $traits['senescence_years'] = $senescenceAge;
+                }
                 return $traits;
+        }
+
+        private function estimateCitizenLongevity () : ?array
+        {
+                $habitability = max(0.0, min(1.0, $this->planet->getHabitabilityScore()));
+                $climate = $this->planet->describeClimate();
+                $variance = floatval($climate['variance'] ?? 0.0);
+                $rate = $this->planet->getRelativeTimeRate();
+                $base = 62.0 + ($habitability * 28.0) - ($variance * 10.0);
+                $base += ($this->technology * 12.0) + ($this->infrastructure * 9.0);
+                $base += ($this->resourceIndex * 6.0) + ($this->stability * 5.0);
+                $base += $this->adaptationLevel * 14.0;
+                if ($rate < 1.0)
+                {
+                        $base += (1.0 - $rate) * 4.0;
+                }
+                elseif ($rate > 1.0)
+                {
+                        $base -= min(10.0, ($rate - 1.0) * 6.0);
+                }
+                $base = max(30.0, min(118.0, $base));
+                $senescence = max(22.0, min($base - 3.0, $base * (0.58 + $habitability * 0.22)));
+                return array('expectancy' => $base, 'senescence' => $senescence);
         }
 
         private function initializeEconomy () : void
@@ -607,7 +693,7 @@ class Country
                         if ($this->isReadyForPopulation())
                         {
                                 $this->populationSeedTimer += $deltaTime;
-                                if ($this->populationSeedTimer >= 86400.0)
+                                if ($this->populationSeedTimer >= $this->getLocalDayLengthSeconds())
                                 {
                                         $this->populationSeedTimer = 0.0;
                                         $seed = intval(max(1, min(
@@ -630,7 +716,8 @@ class Country
                 }
 
                 $this->populationSeedTimer = 0.0;
-                $days = $deltaTime / 86400.0;
+                $dayLength = $this->getLocalDayLengthSeconds();
+                $days = ($dayLength > 0.0) ? ($deltaTime / $dayLength) : 0.0;
                 if ($days <= 0) return;
 
                 $capacityRemaining = max(0, $this->populationCapacity - $population);
@@ -811,7 +898,9 @@ class Country
                         $this->adaptationLevel = $this->sanitizeFraction($this->adaptationLevel + $gain);
                         return;
                 }
-                $decay = ($deltaTime / 604800.0) * 0.01;
+                $week = $this->getLocalWeekLengthSeconds();
+                if ($week <= 0) return;
+                $decay = ($deltaTime / $week) * 0.01;
                 if ($decay > 0)
                 {
                         $this->adaptationLevel = max(0.0, $this->adaptationLevel - $decay);
