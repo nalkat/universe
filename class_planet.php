@@ -136,7 +136,16 @@ class Planet extends SystemObject
                 return $this->orbit;
         }
 
-        public function setOrbit (SystemObject $focus, float $semiMajorAxis, float $period, float $eccentricity = 0.0, float $phase = 0.0) : bool
+        public function setOrbit (
+                SystemObject $focus,
+                float $semiMajorAxis,
+                float $period,
+                float $eccentricity = 0.0,
+                float $phase = 0.0,
+                float $inclination = 0.0,
+                float $ascendingNode = 0.0,
+                float $argumentOfPeriapsis = 0.0
+        ) : bool
         {
                 if ($semiMajorAxis <= 0)
                 {
@@ -155,7 +164,10 @@ class Planet extends SystemObject
                         'semi_major_axis' => floatval($semiMajorAxis),
                         'period' => floatval($period),
                         'eccentricity' => floatval($eccentricity),
-                        'angle' => floatval($phase)
+                        'angle' => floatval($phase),
+                        'inclination' => floatval($inclination),
+                        'ascending_node' => floatval($ascendingNode),
+                        'argument_of_periapsis' => floatval($argumentOfPeriapsis)
                 );
                 $this->updateOrbit(0.0);
                 return true;
@@ -185,6 +197,37 @@ class Planet extends SystemObject
                 {
                         $country->tick($deltaTime);
                 }
+        }
+
+        public function onImpact (SystemObject $impactor, float $impactEnergy, float $relativeSpeed) : void
+        {
+                if ($impactor === $this) return;
+                $planetMass = max(1.0, $this->getMass());
+                $specificEnergy = $impactEnergy / $planetMass;
+                $intensity = min(1.0, log10(1.0 + max(0.0, $specificEnergy)) / 6.0);
+                if ($intensity <= 0)
+                {
+                        return;
+                }
+                $temperatureShock = min(150.0, $relativeSpeed * 0.01 * $intensity);
+                $this->environment['temperature'] += $temperatureShock;
+                foreach (array('water', 'atmosphere', 'magnetosphere', 'biosignatures') as $key)
+                {
+                        $this->environment[$key] = max(0.0, $this->environment[$key] * (1.0 - $intensity * 0.4));
+                }
+                $this->updateHabitabilityScore();
+                foreach ($this->countries as $country)
+                {
+                        if ($country instanceof Country)
+                        {
+                                $country->sufferDisaster($intensity, 'impact by ' . $impactor->getName());
+                        }
+                }
+                Utility::write(
+                        $this->getName() . ' endured an impact from ' . $impactor->getName() . ' (intensity ' . number_format($intensity, 2) . ')',
+                        LOG_INFO,
+                        L_CONSOLE
+                );
         }
 
         private function normalizeFraction ($value) : float
@@ -232,18 +275,60 @@ class Planet extends SystemObject
                 $ecc = $this->orbit['eccentricity'];
                 $semi = $this->orbit['semi_major_axis'];
                 $angle = $this->orbit['angle'];
+                $inclination = $this->orbit['inclination'];
+                $ascendingNode = $this->orbit['ascending_node'];
+                $argumentOfPeriapsis = $this->orbit['argument_of_periapsis'];
                 $radius = $semi;
                 if ($ecc > 0)
                 {
                         $radius = ($semi * (1 - ($ecc * $ecc))) / (1 + ($ecc * cos($angle)));
                 }
-                $this->position['x'] = $focusPosition['x'] + ($radius * cos($angle));
-                $this->position['y'] = $focusPosition['y'] + ($radius * sin($angle));
-                $this->position['z'] = $focusPosition['z'];
+                $orbitalPosition = array(
+                        'x' => $radius * cos($angle),
+                        'y' => $radius * sin($angle),
+                        'z' => 0.0
+                );
                 $angularSpeed = $twoPi / $period;
-                $this->velocity['x'] = $focusVelocity['x'] - ($radius * $angularSpeed * sin($angle));
-                $this->velocity['y'] = $focusVelocity['y'] + ($radius * $angularSpeed * cos($angle));
-                $this->velocity['z'] = $focusVelocity['z'];
+                $orbitalVelocity = array(
+                        'x' => -$radius * $angularSpeed * sin($angle),
+                        'y' => $radius * $angularSpeed * cos($angle),
+                        'z' => 0.0
+                );
+                $rotatedPosition = $this->rotateFromOrbitalPlane($orbitalPosition, $argumentOfPeriapsis, $inclination, $ascendingNode);
+                $rotatedVelocity = $this->rotateFromOrbitalPlane($orbitalVelocity, $argumentOfPeriapsis, $inclination, $ascendingNode);
+                $this->position['x'] = $focusPosition['x'] + $rotatedPosition['x'];
+                $this->position['y'] = $focusPosition['y'] + $rotatedPosition['y'];
+                $this->position['z'] = $focusPosition['z'] + $rotatedPosition['z'];
+                $this->velocity['x'] = $focusVelocity['x'] + $rotatedVelocity['x'];
+                $this->velocity['y'] = $focusVelocity['y'] + $rotatedVelocity['y'];
+                $this->velocity['z'] = $focusVelocity['z'] + $rotatedVelocity['z'];
+        }
+
+        private function rotateFromOrbitalPlane (array $vector, float $argumentOfPeriapsis, float $inclination, float $ascendingNode) : array
+        {
+                $x = $vector['x'];
+                $y = $vector['y'];
+                $z = $vector['z'];
+
+                $cosArg = cos($argumentOfPeriapsis);
+                $sinArg = sin($argumentOfPeriapsis);
+                $x1 = ($cosArg * $x) - ($sinArg * $y);
+                $y1 = ($sinArg * $x) + ($cosArg * $y);
+                $z1 = $z;
+
+                $cosInc = cos($inclination);
+                $sinInc = sin($inclination);
+                $x2 = $x1;
+                $y2 = ($cosInc * $y1) - ($sinInc * $z1);
+                $z2 = ($sinInc * $y1) + ($cosInc * $z1);
+
+                $cosNode = cos($ascendingNode);
+                $sinNode = sin($ascendingNode);
+                $x3 = ($cosNode * $x2) - ($sinNode * $y2);
+                $y3 = ($sinNode * $x2) + ($cosNode * $y2);
+                $z3 = $z2;
+
+                return array('x' => $x3, 'y' => $y3, 'z' => $z3);
         }
 }
 ?>

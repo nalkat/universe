@@ -1,6 +1,6 @@
 <?php // 8.3.6
 
-//require_once __DIR__ . "/EnVision/class_envision.php";
+//require_once __DIR__ . "/telemetry/class_telemetry.php";
 require_once __DIR__ . "/config.php";
 Utility::init();
 $C = new Logger("logs/consoe.log",true);

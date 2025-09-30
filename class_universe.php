@@ -70,6 +70,7 @@ class Universe
 		self::$movement_direction = array ('x' => floatval(0), 'y' => floatval(0), 'z' => floatval(0));
 		self::$numGalaxies = 0;
 		self::$numObjects = 0;
+		self::$objectList = array();
 		self::$age = floatval(0);
 		self::$last_location = array('x' => floatval(0), 'y' => floatval(0), 'z' => floatval(0));
 		self::$current_location = array('x' => floatval(0), 'y' => floatval(0), 'z' => floatval(0));

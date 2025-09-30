@@ -1,7 +1,7 @@
 <?php // 7.3.0
 
-require_once __DIR__ . "../EnVision/class_envision.php";
-require_once __DIR__ . "../logger/class_logger.php";
+require_once __DIR__ . '/../telemetry/class_telemetry.php';
+require_once __DIR__ . '/../logger/class_logger.php';
 //require_once $_SERVER['ENV_PHPROOT'] . "/logger/class_logger.php";
 
 class OnHost {

@@ -4,7 +4,7 @@
 // @REQ:sockets
 // @REQ:pcre
 // @REQ:fileinfo
-// @REQ:EnVision 
+// @REQ:Telemetry 
 // require_once "class_envision.php";
 
 // if these values are not defined elsewhere, define them here
@@ -23,66 +23,66 @@ final class Utility
 	private static $cLog = null;
 	private static $dLog = null;
 	private static $eLog = null;
-//	public  static $EnVision = null;
+//	public  static $Telemetry = null;
 
 	public static function init () : void // attempt to import the logger objects if they already exist
 	{
-		//	if (!isset($GLOBALS['EnVision']) || (!is_a($GLOBALS['EnVision'],"EnVision"))) {
-		//		$GLOBALS['EnVision'] = new EnVision();
+		//	if (!isset($GLOBALS['Telemetry']) || (!is_a($GLOBALS['Telemetry'],"Telemetry"))) {
+		//		$GLOBALS['Telemetry'] = new Telemetry();
 		//	} else {
-		//		Utility::EnVision &= $GLOBALS['EnVision'];
+		//		Utility::Telemetry &= $GLOBALS['Telemetry'];
 		//	}
-		//	self::$EnVision->objects_instantiated++;
-		//	self::$EnVision->functions_entered++;
+		//	self::$Telemetry->objects_instantiated++;
+		//	self::$Telemetry->functions_entered++;
 		global $accessLog, $consoleLog, $debugLog, $errorLog;
 		if (($accessLog !== null) && (is_a($accessLog,"Logger"))) {
 			self::$aLog =& $accessLog;
-			//self::$EnVision->files_opened++;
+			//self::$Telemetry->files_opened++;
 		}
 		if (($consoleLog !== null) && (is_a($consoleLog,"Logger"))) {
 			self::$cLog =& $consoleLog;
-			//self::$EnVision->files_opened++;
+			//self::$Telemetry->files_opened++;
 		}
 		if (($debugLog !== null) && (is_a($debugLog,"Logger"))) {
 			self::$dLog =& $debugLog;
-			//self::$EnVision->files_opened++;
+			//self::$Telemetry->files_opened++;
 		}
 		if (($errorLog !== null) && (is_a($errorLog,"Logger"))) {
 			self::$eLog =& $errorLog;
-			//self::$EnVision->files_opened++;
+			//self::$Telemetry->files_opened++;
 		}
 		self::$address = null;
 		self::$socket = null;
-		// self::$EnVision->functions_left++;
+		// self::$Telemetry->functions_left++;
 	}
 
 	// a bash clone of the same name
 	public static function getopts (string $optStr, array $longOptStr = null) {
-		// self::$EnVision->functions_entered++;
-		// self::$EnVision->functions_left++;
+		// self::$Telemetry->functions_entered++;
+		// self::$Telemetry->functions_left++;
 	  return (empty($longOptStr) ? getopt($optStr) : getopt($optStr, $longOptStr));
 	}
 
 	public static function isMTU (int $mtu) : bool
 	{
-		//self::$EnVision->functions_entered++;
+		//self::$Telemetry->functions_entered++;
 		$valid = false;
 		if (!empty($mtu))
 		{
 			if ($mtu % 8 === 0) {
 				$valid = true;
 			} else {
-				self::$EnVision->functions_left++;
-				self::$EnVision->exceptions_thrown++;
+				self::$Telemetry->functions_left++;
+				self::$Telemetry->exceptions_thrown++;
 				throw new Exception ("invalid mtu '$mtu', try (" . ($mtu - ($mtu % 8)) . ") or (" . ($mtu + (8 - ($mtu % 8))) . ")", 1);
 			}	
 		} else {
 			// MTU is empty(false, null or zero) all are bad
-			//self::$EnVision->functions_left++;
-			//self::$EnVision->exceptions_thrown++;
+			//self::$Telemetry->functions_left++;
+			//self::$Telemetry->exceptions_thrown++;
 			throw new Exception ("MTU '$mtu' cannot be 0", 1);
 		}
-		//self::$EnVision->functions_left++;
+		//self::$Telemetry->functions_left++;
 		return ($valid);
 	}
  
@@ -93,7 +93,7 @@ final class Utility
 	// will return 8 characters.
 	public static function mktmpnam (int $len=0) : string
 	{
-		//self::$EnVision->functions_entered++;
+		//self::$Telemetry->functions_entered++;
 		// we're using 0-inclusive values so $len becomes ($len -1)
 		if ($len <= 0) $len = 8;
 		$i = 0;
@@ -128,87 +128,87 @@ final class Utility
 				// there is no supposing in this function. it looks solid.
 			}
 		}
-		//self::$EnVision->functions_left++;
+		//self::$Telemetry->functions_left++;
 		// now push all of the elements into a string and return that to our calling function;
 		return (implode('',$chararr));
 	}
 
 	public static function isIPv4 (string $ipAddress) : bool
 	{
-		//self::$EnVision->functions_entered++;
+		//self::$Telemetry->functions_entered++;
 		if (($ipAddress = filter_var($ipAddress,FILTER_VALIDATE_IP,FILTER_FLAG_IPV4|FILTER_FLAG_NO_RES_RANGE)) === false)
 		{
-			//self::$EnVision->functions_left++;
+			//self::$Telemetry->functions_left++;
 			return false;
 		}
 		else
 		{
-			//self::$EnVision->functions_left++;
+			//self::$Telemetry->functions_left++;
 			return true;
 		}
-		//self::$EnVision->functions_left++;
+		//self::$Telemetry->functions_left++;
 	}
 
 	public static function isIPv6 (string $ipAddress) : bool
 	{
-		//self::$EnVision->functions_entered++;
+		//self::$Telemetry->functions_entered++;
 		if (($ipAddress = filter_var($ipAddress,FILTER_VALIDATE_IP,FILTER_FLAG_IPV6|FILTER_FLAG_NO_RES_RANGE)) === 0)
 		{
-			//self::$EnVision->functions_left++;
+			//self::$Telemetry->functions_left++;
 			return false;
 		}
 		else
 		{
-			//self::$EnVision->functions_left++;
+			//self::$Telemetry->functions_left++;
 			return true;
 		}
-		//self::$EnVision->functions_left++;
+		//self::$Telemetry->functions_left++;
 	}
 
 	public static function getDomain (string $hostname = "") : string
 	{
-		// self::$EnVision->functions_entered++;
-		if (!empty($hostname)) && preg_match('/[^.]+\.[^.]+$/', $hostname, $matches) {
-			// self::$EnVision->functions_left++;
+		// self::$Telemetry->functions_entered++;
+		if (!empty($hostname) && preg_match('/[^.]+\.[^.]+$/', $hostname, $matches)) {
+			// self::$Telemetry->functions_left++;
 			return ($matches[0]);
 		}
-		// self::$EnVision->functions_left++;
-		return NULL;;
+		// self::$Telemetry->functions_left++;
+		return null;
 	}
 
 	public static function cleanExit (int $code = 0) : int
 	{
-		//self::$EnVision->functions_entered++;
+		//self::$Telemetry->functions_entered++;
 		if (is_resource(self::$aLog)) {
 			if (!fclose (self::$aLog)) {
-		//		self::$EnVision->exceptions_thrown++;
+		//		self::$Telemetry->exceptions_thrown++;
 				throw new Exception ("FATAL: Failed to close the accessLog",250);
 			}
-		//	self::$EnVision->files_closed++;
+		//	self::$Telemetry->files_closed++;
 		}
 		if (is_resource(self::$cLog)) {
 			if (!fclose (self::$cLog)) {
-		//		self::$EnVision->exceptions_thrown++;
+		//		self::$Telemetry->exceptions_thrown++;
 				throw new Exception ("FATAL: Failed to close the consoleLog",251);
 			}
-		//	self::$EnVision->files_closed++;
+		//	self::$Telemetry->files_closed++;
 		}
 		if (is_resource(self::$dLog)) {
 			if (!fclose (self::$dLog)) {
-		//		self::$EnVision->exceptions_thrown++;
+		//		self::$Telemetry->exceptions_thrown++;
 				throw new Exception ("FATAL: Failed to close the debugLog",252);
 			}
-		//	self::$EnVision->files_closed++;
+		//	self::$Telemetry->files_closed++;
 		}
 		if (is_resource(self::$eLog)) {
 			if (!fclose (self::$eLog)) {
-		//		self::$EnVision->exceptions_thrown++;
+		//		self::$Telemetry->exceptions_thrown++;
 				throw new Exception ("FATAL: Failed to close the accessLog",253);
 			}
-		//	self::$EnVision->files_closed++;
+		//	self::$Telemetry->files_closed++;
 		}
 		if (self::is_connected(self::$socket)) socket_close(self::$socket);
-		//self::$EnVision->functions_left++;
+		//self::$Telemetry->functions_left++;
 		exit ($code);
 	}
 

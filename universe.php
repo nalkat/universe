@@ -1,6 +1,6 @@
 <?php // 7.3.0-dev
 
-require_once __DIR__ . "/EnVision/class_envision.php";
+require_once __DIR__ . "/telemetry/class_telemetry.php";
 require_once __DIR__ . "/config.php";
 require_once __DIR__ . "/class_universeDaemon.php";
 Utility::init();
@@ -58,7 +58,10 @@ $blueprint = array(
                                                         'orbit' => array(
                                                                 'semi_major_axis' => 1.496E11,
                                                                 'period' => 365.25 * 86400,
-                                                                'eccentricity' => 0.0167
+                                                                'eccentricity' => 0.0167,
+                                                                'inclination_deg' => 0.5,
+                                                                'ascending_node_deg' => 174.9,
+                                                                'argument_of_periapsis_deg' => 288.1
                                                         ),
                                                         'countries' => array(
                                                                 array(
@@ -90,7 +93,10 @@ $blueprint = array(
                                                         'orbit' => array(
                                                                 'semi_major_axis' => 2.279E11,
                                                                 'period' => 687 * 86400,
-                                                                'eccentricity' => 0.0934
+                                                                'eccentricity' => 0.0934,
+                                                                'inclination_deg' => 1.85,
+                                                                'ascending_node_deg' => 49.6,
+                                                                'argument_of_periapsis_deg' => 286.5
                                                         )
                                                 )
                                         )
@@ -130,7 +136,10 @@ $blueprint = array(
                                                         'orbit' => array(
                                                                 'semi_major_axis' => 1.1E11,
                                                                 'period' => 320 * 86400,
-                                                                'eccentricity' => 0.05
+                                                                'eccentricity' => 0.05,
+                                                                'inclination_deg' => 12.0,
+                                                                'ascending_node_deg' => 88.0,
+                                                                'argument_of_periapsis_deg' => 45.0
                                                         ),
                                                         'countries' => array(
                                                                 array(

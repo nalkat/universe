@@ -12,6 +12,8 @@ class System
         private $timeStep;
         private $propagationMode;
         private $gravitySofteningLength;
+        private $eventLog;
+        private $eventLogLimit;
 
         public function __construct (string $name, ?Star $primaryStar = null)
         {
@@ -22,6 +24,8 @@ class System
                 $this->timeStep = floatval(60);
                 $this->propagationMode = self::PROPAGATION_ANALYTIC;
                 $this->gravitySofteningLength = floatval(0);
+                $this->eventLog = array();
+                $this->eventLogLimit = 100;
                 if ($primaryStar instanceof Star)
                 {
                         $this->setPrimaryStar($primaryStar);
@@ -95,12 +99,22 @@ class System
                 $this->registerObject($object);
         }
 
-        public function addPlanet (Planet $planet, ?SystemObject $focus = null, ?float $semiMajorAxis = null, ?float $period = null, float $eccentricity = 0.0, float $phase = 0.0) : void
+        public function addPlanet (
+                Planet $planet,
+                ?SystemObject $focus = null,
+                ?float $semiMajorAxis = null,
+                ?float $period = null,
+                float $eccentricity = 0.0,
+                float $phase = 0.0,
+                float $inclination = 0.0,
+                float $ascendingNode = 0.0,
+                float $argumentOfPeriapsis = 0.0
+        ) : void
         {
                 $this->registerObject($planet);
                 if (($focus instanceof SystemObject) && ($semiMajorAxis !== null) && ($period !== null))
                 {
-                        if ($planet->setOrbit($focus, $semiMajorAxis, $period, $eccentricity, $phase))
+                        if ($planet->setOrbit($focus, $semiMajorAxis, $period, $eccentricity, $phase, $inclination, $ascendingNode, $argumentOfPeriapsis))
                         {
                                 Utility::write(
                                         $planet->getName() . " orbit registered around " . $focus->getName(),
@@ -186,8 +200,12 @@ class System
                 }
                 foreach ($this->objects as $object)
                 {
-                        $object->tick($step);
+                        if ($object instanceof SystemObject)
+                        {
+                                $object->tick($step);
+                        }
                 }
+                $this->resolveCollisions($step);
                 $this->age += $step;
         }
 
@@ -272,6 +290,22 @@ class System
                 );
         }
 
+        public function getRecentEvents (?int $limit = null) : array
+        {
+                if ($limit === null)
+                {
+                        return $this->eventLog;
+                }
+                $limit = max(0, intval($limit));
+                if ($limit === 0) return array();
+                return array_slice($this->eventLog, -$limit);
+        }
+
+        public function clearEventLog () : void
+        {
+                $this->eventLog = array();
+        }
+
         private function applyGravitationalAccelerations (float $deltaTime) : void
         {
                 if ($deltaTime <= 0) return;
@@ -339,11 +373,147 @@ class System
                 foreach ($accelerations as $name => $vector)
                 {
                         $object = $this->objects[$name];
+                        if ($object->isDestroyed())
+                        {
+                                continue;
+                        }
                         if ($object->getMass() <= 0)
                         {
                                 continue;
                         }
                         $object->applyAcceleration($vector, $deltaTime);
+                }
+        }
+
+        private function resolveCollisions (float $deltaTime) : void
+        {
+                $names = array_keys($this->objects);
+                $count = count($names);
+                if ($count < 2) return;
+                $collisions = array();
+                for ($i = 0; $i < $count; $i++)
+                {
+                        $nameA = $names[$i];
+                        $objectA = $this->objects[$nameA];
+                        if (!($objectA instanceof SystemObject) || $objectA->isDestroyed())
+                        {
+                                continue;
+                        }
+                        $radiusA = $objectA->getRadius();
+                        if ($radiusA <= 0)
+                        {
+                                continue;
+                        }
+                        for ($j = $i + 1; $j < $count; $j++)
+                        {
+                                $nameB = $names[$j];
+                                $objectB = $this->objects[$nameB];
+                                if (!($objectB instanceof SystemObject) || $objectB->isDestroyed())
+                                {
+                                        continue;
+                                }
+                                $radiusB = $objectB->getRadius();
+                                if ($radiusB <= 0)
+                                {
+                                        continue;
+                                }
+                                $distance = $objectA->distanceTo($objectB);
+                                if ($distance <= 0)
+                                {
+                                        $collisions[] = array($nameA, $nameB);
+                                        continue;
+                                }
+                                $threshold = $radiusA + $radiusB;
+                                if ($distance <= $threshold)
+                                {
+                                        $collisions[] = array($nameA, $nameB);
+                                }
+                        }
+                }
+                foreach ($collisions as $pair)
+                {
+                        list($nameA, $nameB) = $pair;
+                        if (!isset($this->objects[$nameA]) || !isset($this->objects[$nameB])) continue;
+                        $objectA = $this->objects[$nameA];
+                        $objectB = $this->objects[$nameB];
+                        if (!($objectA instanceof SystemObject) || !($objectB instanceof SystemObject)) continue;
+                        if ($objectA->isDestroyed() || $objectB->isDestroyed()) continue;
+                        $this->handleCollision($objectA, $objectB, $deltaTime);
+                }
+        }
+
+        private function handleCollision (SystemObject $a, SystemObject $b, float $deltaTime) : void
+        {
+                $massA = max(0.0, $a->getMass());
+                $massB = max(0.0, $b->getMass());
+                $totalMass = $massA + $massB;
+                if ($totalMass <= 0)
+                {
+                        return;
+                }
+                $velocityA = $a->getVelocity();
+                $velocityB = $b->getVelocity();
+                $relativeVelocity = array(
+                        'x' => $velocityA['x'] - $velocityB['x'],
+                        'y' => $velocityA['y'] - $velocityB['y'],
+                        'z' => $velocityA['z'] - $velocityB['z']
+                );
+                $relativeSpeed = sqrt(
+                        pow($relativeVelocity['x'], 2) +
+                        pow($relativeVelocity['y'], 2) +
+                        pow($relativeVelocity['z'], 2)
+                );
+                $reducedMass = ($massA * $massB) / $totalMass;
+                $impactEnergy = 0.5 * $reducedMass * $relativeSpeed * $relativeSpeed;
+                $momentum = array(
+                        'x' => ($massA * $velocityA['x']) + ($massB * $velocityB['x']),
+                        'y' => ($massA * $velocityA['y']) + ($massB * $velocityB['y']),
+                        'z' => ($massA * $velocityA['z']) + ($massB * $velocityB['z'])
+                );
+                $positionA = $a->getPosition();
+                $positionB = $b->getPosition();
+                $newPosition = array(
+                        'x' => ($positionA['x'] * $massA + $positionB['x'] * $massB) / $totalMass,
+                        'y' => ($positionA['y'] * $massA + $positionB['y'] * $massB) / $totalMass,
+                        'z' => ($positionA['z'] * $massA + $positionB['z'] * $massB) / $totalMass
+                );
+                $newVelocity = array(
+                        'x' => $momentum['x'] / $totalMass,
+                        'y' => $momentum['y'] / $totalMass,
+                        'z' => $momentum['z'] / $totalMass
+                );
+                $survivor = ($massA >= $massB) ? $a : $b;
+                $consumed = ($survivor === $a) ? $b : $a;
+                $combinedRadius = pow(
+                        pow(max(0.0, $a->getRadius()), 3) +
+                        pow(max(0.0, $b->getRadius()), 3),
+                        1.0 / 3.0
+                );
+                $survivor->setMass($totalMass);
+                $survivor->setRadius(max($survivor->getRadius(), $combinedRadius));
+                $survivor->setPosition($newPosition);
+                $survivor->setVelocity($newVelocity);
+                $summary = array(
+                        'timestamp' => $this->age,
+                        'type' => 'collision',
+                        'objects' => array($a->getName(), $b->getName()),
+                        'survivor' => $survivor->getName(),
+                        'energy' => $impactEnergy,
+                        'relative_speed' => $relativeSpeed
+                );
+                $this->recordEvent($summary);
+                $survivor->onImpact($consumed, $impactEnergy, $relativeSpeed);
+                $consumed->onImpact($survivor, $impactEnergy, $relativeSpeed);
+                $consumed->destroy('collision with ' . $survivor->getName());
+                unset($this->objects[$consumed->getName()]);
+        }
+
+        private function recordEvent (array $event) : void
+        {
+                $this->eventLog[] = $event;
+                if (count($this->eventLog) > $this->eventLogLimit)
+                {
+                        $this->eventLog = array_slice($this->eventLog, -$this->eventLogLimit);
                 }
         }
 }

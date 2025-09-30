@@ -6,3 +6,10 @@
 - [x] Improve the universe simulator executable to orchestrate subobject ticks.
 - [x] Document readiness criteria for population spawning.
 - [x] Introduce a blueprint-driven bootstrapper that wires galaxies, systems, planets, and countries together.
+- [x] Model resilience/adaptation loops so populations learn from famine and disasters.
+- [x] Establish material, chemical, and taxonomy scaffolding for future matter simulations.
+- [x] Flesh out plant, animal, and insect behaviours for ecological modelling.
+- [x] Create settlement and housing infrastructure classes to host emerging populations.
+- [x] Prototype adaptive habitats (nests, burrows, emergent shelters) that can fail, learn, and evolve alongside their builders.
+- [x] Deliver an operator console view to inspect galaxies, systems, planets, and civilizations in real time.
+- [ ] Stress-test habitat experimentation loops across multi-season environmental scenarios.
