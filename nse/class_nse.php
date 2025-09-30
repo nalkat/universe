@@ -40,7 +40,7 @@ define("ENV_MISSING_SETUPDIR", 0xF9);
 define("ENV_MISSING_TMPROOT", 0xFA);
 define("ENV_MISSING_TMPDIR", 0xFB);
 define("ENV_MISSING_USERDIR", 0xFC);
-define("ENV_MISSING_VISION", 0xFD);
+define("ENV_MISSING_TELEMETRY", 0xFD);
 define("ENV_MISSING_ROOT", 0xFE);
 // not installed error code
 define("ENV_NOT_INSTALLED", 0xFF);
@@ -114,39 +114,39 @@ class nse {
 		// just slow things down and doesn't provide anything useful while not fully done
 		// installing.
 		$host ?? $host = new host($debug,true); // there is no manual scan method for host. rectify.
-		if (($GLOBALS['EnVision'] ?? false ) !== false) {
-			$GLOBALS['EnVision']->objects_instantiated++;
-			$GLOBALS['EnVision']->functions_entered++;
+		if (($GLOBALS['Telemetry'] ?? false ) !== false) {
+			$GLOBALS['Telemetry']->objects_instantiated++;
+			$GLOBALS['Telemetry']->functions_entered++;
 		}
 		if (($_ENV["ENV_INSTALLED"] ?? false) === false)
 		{
 		
-			if (($GLOBALS['EnVision'] ?? false) !== false) {
-				$GLOBALS['EnVision']->functions_left++;
+			if (($GLOBALS['Telemetry'] ?? false) !== false) {
+				$GLOBALS['Telemetry']->functions_left++;
 			}
 			return ;
 		} else {
 			$this->host =& $host;
-			if (($GLOBALS['EnVision'] ?? false) !== false) {
-				$GLOBALS['EnVision']->functions_left++;
+			if (($GLOBALS['Telemetry'] ?? false) !== false) {
+				$GLOBALS['Telemetry']->functions_left++;
 			}
 			return;
 		}
 	}
 
 	public function __destruct () {
-		if (($GLOBALS['EnVision'] ?? false) !== false) {
-			$GLOBALS['EnVision']->functions_entered++;
-			$GLOBALS['EnVision']->objects_destroyed++;
-			$GLOBALS['EnVision']->functions_left++;
+		if (($GLOBALS['Telemetry'] ?? false) !== false) {
+			$GLOBALS['Telemetry']->functions_entered++;
+			$GLOBALS['Telemetry']->objects_destroyed++;
+			$GLOBALS['Telemetry']->functions_left++;
 		}
 	}
 
 	public function cleanExit (int $code = null) : void
 	{
-		if (($GLOBALS['EnVision'] ?? false) !== false) {
-			$GLOBALS['EnVision']->functions_entered++;
-			$GLOBALS['EnVision']->functions_left++;
+		if (($GLOBALS['Telemetry'] ?? false) !== false) {
+			$GLOBALS['Telemetry']->functions_entered++;
+			$GLOBALS['Telemetry']->functions_left++;
 		}
 		if ($code === null) return;
 		if ($this->hasTempNodeList === true)
@@ -368,7 +368,7 @@ class nse {
 
 	private function isOSSupported () : bool
 	{
-		$this->EnVision->functions_entered++;
+		$this->Telemetry->functions_entered++;
 		// if any of the following variables don the value 'unsupported', then
 		// this function will return false; These values are filled using the
 		// getClientVersion script and should depict a picture of what hardware
@@ -388,17 +388,17 @@ class nse {
 				(strcmp($this->osDist,"unsupported") === true)
 			 )
 		{
-			$this->EnVision->functions_left++;
+			$this->Telemetry->functions_left++;
 			return false;
 		} else {
-			$this->EnVision->functions_left++;
+			$this->Telemetry->functions_left++;
 			return true;
 		}
 	}
 
 	private function validate_environment () : bool
 	{
-		$this->EnVision->functions_entered++;
+		$this->Telemetry->functions_entered++;
 		// to validate the environment, we need to look for the following:
 			// valid directory structure
 			// valid ENV_OSNAME variable (simple check finished)
@@ -414,7 +414,7 @@ class nse {
 				if ($found->getCode === true) $lsattr = $found->getMessage();
 				else {
 					echo $found->getMessage() . PHP_EOL;
-					$this->EnVision->functions_left++;
+					$this->Telemetry->functions_left++;
 					return ($found->getCode());
 				}
 			}
@@ -425,12 +425,12 @@ class nse {
 //			while (!feof($pp)) $ret = trim(fgets($pp));
 			if (empty($ret)) {
 				$this->lastError = ENV_MISSING_NSEROOT;
-				$this->EnVision->functions_left++;
+				$this->Telemetry->functions_left++;
 				return (false);
 			} else {
 				if ($ret !== 'i') {
 					var_export ($ret);
-					$this->EnVision->functions_left++;
+					$this->Telemetry->functions_left++;
 					return false;
 				}
 			}
@@ -438,17 +438,17 @@ class nse {
 			if (($this->validate_directories()) === false)
 			{
 				$this->lastError = ENV_INVALID_DIRECTORY_STRUCTURE;
-				$this->EnVision->functions_left++;
+				$this->Telemetry->functions_left++;
 				return false;
 			}
 			// Directory structure is valid.
 			if ($this->isOSSupported() === false) {
 				$this->lastError = ENV_OS_IS_UNSUPPORTED;
-				$this->EnVision->functions_left++;				
+				$this->Telemetry->functions_left++;				
 				return false;
 			}
 			// Passed the 3 criteria..... return true
-			$this->EnVision->functions_left++;
+			$this->Telemetry->functions_left++;
 			return true;
 	}
 

@@ -18,7 +18,7 @@ class Host
 
 	private $id;
 
-	private EnVision $EnVision;
+	private Telemetry $Telemetry;
 
 	// hal-device /org/freedesktop/Hal/devices/computer 
 	private string $manufacturer;		// dmidecode -s system-manufacturer
@@ -88,7 +88,7 @@ class Host
 	private string $lastError;
 	public $dbHost;
 	
-	public function __construct (bool $debug = false, bool $scan = true, ?EnVision $EnVision = null)
+	public function __construct (bool $debug = false, bool $scan = true, ?Telemetry $Telemetry = null)
 	{
 		date_default_timezone_set('America/Los_Angeles');
 		$this->debug = $debug;
@@ -98,34 +98,34 @@ class Host
 			Utility::ncWrite(__METHOD__ . " Entering function", LOG_DEBUG_INOUT, L_DEBUG);
 		}
 		$this->initializeObject();
-		if ((empty($EnVision)) || (!is_a($EnVision,"EnVision"))) {
-			if ((isset($GLOBALS['EnVision'])) && (is_a($GLOBALS['EnVision'],"EnVision"))) {
-				$this->EnVision =& $GLOBALS['EnVision'];
+		if ((empty($Telemetry)) || (!is_a($Telemetry,"Telemetry"))) {
+			if ((isset($GLOBALS['Telemetry'])) && (is_a($GLOBALS['Telemetry'],"Telemetry"))) {
+				$this->Telemetry =& $GLOBALS['Telemetry'];
 			} else {
-				$this->EnVision = new EnVision($_ENV['ENV_VISIONDIR']."/objects/cereal");
-				$this->EnVision->objects_instantiated++;
-				$this->EnVision->objects_unserialized++;
+				$this->Telemetry = new Telemetry($_ENV['UNIVERSE_TELEMETRY_DIR']."/objects/cereal");
+				$this->Telemetry->objects_instantiated++;
+				$this->Telemetry->objects_unserialized++;
 			}
 		} else {
-			$this->EnVision =& $EnVision;
-			$this->EnVision->objects_instantiated++;
+			$this->Telemetry =& $Telemetry;
+			$this->Telemetry->objects_instantiated++;
 		}
-		$this->EnVision->objects_instantiated++;
-		$this->EnVision->log_lines_written+=2;
-		$this->EnVision->log_lines_in_color+=2;
-		$this->EnVision->log_debug_lines_logged++;
-		$this->EnVision->log_init_lines++;
-		$this->EnVision->log_bytes_written+=strlen("Enabling verbose debugging in class Host");
-		$this->EnVision->log_bytes_written+=strlen(__METHOD__ . " Entering function");
-		$this->EnVision->files_opened+=2;
-		$this->EnVision->files_created++;
-		$this->EnVision->functions_entered+=3;
+		$this->Telemetry->objects_instantiated++;
+		$this->Telemetry->log_lines_written+=2;
+		$this->Telemetry->log_lines_in_color+=2;
+		$this->Telemetry->log_debug_lines_logged++;
+		$this->Telemetry->log_init_lines++;
+		$this->Telemetry->log_bytes_written+=strlen("Enabling verbose debugging in class Host");
+		$this->Telemetry->log_bytes_written+=strlen(__METHOD__ . " Entering function");
+		$this->Telemetry->files_opened+=2;
+		$this->Telemetry->files_created++;
+		$this->Telemetry->functions_entered+=3;
 		if ($scan === true)
 		{
 			$this->loadModules ();	// load external class definitions
 			Utility::ncWrite("Performing initial host scan and updating the database", LOG_INIT, L_CONSOLE);
-			$this->EnVision->log_lines_written++;
-			$this->EnVision->log_lines_in_color++;
+			$this->Telemetry->log_lines_written++;
+			$this->Telemetry->log_lines_in_color++;
 			$this->gatherHostInfo ();
 			$this->dbUpdate ();
 		}
@@ -187,7 +187,7 @@ class Host
 	private function initializeObject () : void
 	{
 		if ($this->debug === true) Utility::ncWrite(__METHOD__ . " Entering function and setting default values", LOG_DEBUG_INOUT, L_DEBUG);
-		$this->EnVision = new Envision();
+		$this->Telemetry = new Telemetry();
 		$this->dbHost = null; // object pointer?
 		$this->id = 0;
 		$this->manufacturer = "";
@@ -564,7 +564,7 @@ class Host
 	private function determineVirtualized () : bool
 	{
 		$isVirt = false;
-		if ((isset($this->EnVision)) && (is_a($this->EnVision,"EnVision"))) $this->EnVision->functions_entered++;
+		if ((isset($this->Telemetry)) && (is_a($this->Telemetry,"Telemetry"))) $this->Telemetry->functions_entered++;
 		if ($this->debug === true) Utility::ncWrite(__METHOD__ . " Entering function", LOG_DEBUG_INOUT, L_DEBUG);
 		if (($this->osType == "Linux") && (file_exists("/sbin/virt-what")))
 		{
@@ -2546,7 +2546,7 @@ class Host
 
 	public function hostInfo () : string
 	{
-		$this->EnVision->functions_entered++;
+		$this->Telemetry->functions_entered++;
 		$infoString = "";
 		if ($this->debug === true) Utility::ncWrite(__METHOD__ . " Entering function", LOG_DEBUG_INOUT, L_DEBUG);
 		if (!empty($this->id) || $this->id == 0)		$infoString =  "Host ID      : " . $this->id . PHP_EOL;
@@ -2602,7 +2602,7 @@ class Host
 		if (!empty($this->containerApplication))	$infoString .= "Container App: " . $this->containerApplication . PHP_EOL;
 		if (!empty($this->comments))				$infoString .= "Comments     : " . $this->comments . PHP_EOL;
 		if ($this->debug === true) Utility::ncWrite(__METHOD__ . " Leaving function", LOG_DEBUG_INOUT, L_DEBUG);
-		$this->EnVision->functions_left++;
+		$this->Telemetry->functions_left++;
 		return $infoString;
 	}
 

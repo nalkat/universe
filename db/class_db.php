@@ -1,7 +1,7 @@
 <?php
-#require_once __DIR__ . "/../EnVision/class_envision.php";
-//if ((!is_object($GLOBALS['EnVision'])) || (!is_a($GLOBALS['EnVision'],"EnVision"))) {
-//	$GLOBALS['EnVision'] = new EnVision();
+#require_once __DIR__ . "/../telemetry/class_telemetry.php";
+//if ((!is_object($GLOBALS['Telemetry'])) || (!is_a($GLOBALS['Telemetry'],"Telemetry"))) {
+//	$GLOBALS['Telemetry'] = new Telemetry();
 //}
 
 /**
@@ -16,8 +16,8 @@
  */
 class db {
 
-	private $isEnVisioned;	// boolval describing whether or not the EnVision class is available
-	public  $EnVision;			// the rescoped global object affecting db ops
+	private $hasTelemetry;	// boolval describing whether or not the Telemetry class is available
+	public  $Telemetry;			// the rescoped global object affecting db ops
 
 	private $dbType;		// this is the dbType ('pgsql'|'sqlite3')
 	private $dbUser;
@@ -42,38 +42,38 @@ class db {
 	private $__dbSock;
 
 	public function __invoke() : bool {
-		if (!is_a($this->EnVision,"EnVision")) {
-			if ((is_object($GLOBALS['EnVision'])) && (is_a($GLOBALS['EnVision'],"EnVision"))) {
-				$this->EnVision =& $GLOBALS['EnVision'];
-				$this->isEnVisioned = true;
+		if (!is_a($this->Telemetry,"Telemetry")) {
+			if ((is_object($GLOBALS['Telemetry'])) && (is_a($GLOBALS['Telemetry'],"Telemetry"))) {
+				$this->Telemetry =& $GLOBALS['Telemetry'];
+				$this->hasTelemetry = true;
 			} else {
-				$this->EnVision = new EnVision();
-				$this->isEnVisioned = true;
+				$this->Telemetry = new Telemetry();
+				$this->hasTelemetry = true;
 			}
 		}
-		$this->EnVision->functions_entered++;
-		$this->EnVision->db_objects_instantiated++;
-		$this->EnVision->objects_invoked++;
-		$this->EnVision->objects_instantiated++;
+		$this->Telemetry->functions_entered++;
+		$this->Telemetry->db_objects_instantiated++;
+		$this->Telemetry->objects_invoked++;
+		$this->Telemetry->objects_instantiated++;
 		if ($this->dbType === "pgsql") {
-			$this->EnVision->ports[] = $this->dbPort;
-			$this->EnVision->hosts[] = $this->dbHost;
-			$this->EnVision->users[] = $this->dbUser;
-			$this->EnVision->names[] = $this->dbName;
-			$this->EnVision->types[] = $this->dbType;
-			$this->EnVision->socks[] =& $this->__dbSock;
-			$this->EnVision->tlsconn[] = $this->tlsconn;
+			$this->Telemetry->ports[] = $this->dbPort;
+			$this->Telemetry->hosts[] = $this->dbHost;
+			$this->Telemetry->users[] = $this->dbUser;
+			$this->Telemetry->names[] = $this->dbName;
+			$this->Telemetry->types[] = $this->dbType;
+			$this->Telemetry->socks[] =& $this->__dbSock;
+			$this->Telemetry->tlsconn[] = $this->tlsconn;
 		}
 		if ($this->dbType === 'sqlite3') {
-			$this->EnVision->ports[] = $this->dbPort;
-			$this->EnVision->hosts[] = $this->dbHost;
-			$this->EnVision->users[] = $this->dbUser;
-			$this->EnVision->names[] = $this->dbName;
-			$this->EnVision->types[] = $this->dbType;
-			$this->EnVision->socks[] = $this->__dbSock;
-			$this->EnVision->tlsconn[] = $this->tlsconn;
+			$this->Telemetry->ports[] = $this->dbPort;
+			$this->Telemetry->hosts[] = $this->dbHost;
+			$this->Telemetry->users[] = $this->dbUser;
+			$this->Telemetry->names[] = $this->dbName;
+			$this->Telemetry->types[] = $this->dbType;
+			$this->Telemetry->socks[] = $this->__dbSock;
+			$this->Telemetry->tlsconn[] = $this->tlsconn;
 		}
-		$this->EnVision->functions_left++;
+		$this->Telemetry->functions_left++;
 		if (!$this->is_connected()) return ($this->connect());
 		else return true;
 	}
@@ -89,7 +89,7 @@ class db {
 	 * @param bool $sqlite3
 	 * @return void && throw exception with message and return code (0 = success, 1 = failure);
 	 */
-	public function __construct (?string $dbHost=null, ?int $dbPort=null, ?string $dbUser=null, ?string $dbPass=null, ?string $dbName=null, ?bool $sqlite3 = false, ?EnVision $EnVision = null)
+	public function __construct (?string $dbHost=null, ?int $dbPort=null, ?string $dbUser=null, ?string $dbPass=null, ?string $dbName=null, ?bool $sqlite3 = false, ?Telemetry $Telemetry = null)
 	{
 		if (!isset($dbHost) || !is_string($dbHost)) $dbHost = null;
 		if (!isset($dbPort) || !is_int($dbPort)) $dbPort = null;
@@ -98,25 +98,25 @@ class db {
 		if (!isset($dbName) || !is_string($dbName)) $dbName = null;
 		if (!isset($sqlite3) || !is_bool($sqlite3)) $sqlite3 = false;
 		$this->initializeObject ();
-		if (!class_exists("EnVision")) require_once __DIR__ . "/EnVision/class_envision.php";
-			if (isset($EnVision) && is_a($EnVision,"EnVision")) {
-			$GLOBALS['EnVision'] =& $EnVision;
+		if (!class_exists("Telemetry")) require_once __DIR__ . "/../telemetry/class_telemetry.php";
+			if (isset($Telemetry) && is_a($Telemetry,"Telemetry")) {
+			$GLOBALS['Telemetry'] =& $Telemetry;
 		}
-		//isset($GLOBALS['EnVision']) || $GLOBALS['EnVision'] = new EnVision();
-		if (isset($GLOBALS['EnVision']) && is_a($GLOBALS['EnVision'],"EnVision"))
+		//isset($GLOBALS['Telemetry']) || $GLOBALS['Telemetry'] = new Telemetry();
+		if (isset($GLOBALS['Telemetry']) && is_a($GLOBALS['Telemetry'],"Telemetry"))
 		{
-			$this->EnVision =& $GLOBALS['EnVision']; // pass reference of the EnVision object to scope it in for dbops collecting
-			$this->EnVision->functions_entered++;
-			$this->EnVision->objects_instantiated++;
-			$this->isEnVisioned = true;
+			$this->Telemetry =& $GLOBALS['Telemetry']; // pass reference of the Telemetry object to scope it in for dbops collecting
+			$this->Telemetry->functions_entered++;
+			$this->Telemetry->objects_instantiated++;
+			$this->hasTelemetry = true;
 		}
 		else 
 		{
-			$this->EnVision = new EnVision();
-			$GLOBALS['EnVision'] =& $this->EnVision;
-			$this->EnVision->functions_entered++;
-			$this->EnVision->objects_instantiated++;
-			$this->isEnVisioned = true;
+			$this->Telemetry = new Telemetry();
+			$GLOBALS['Telemetry'] =& $this->Telemetry;
+			$this->Telemetry->functions_entered++;
+			$this->Telemetry->objects_instantiated++;
+			$this->hasTelemetry = true;
 		}
 		if ($dbHost === null) // determine the database server's name
 		{
@@ -125,54 +125,54 @@ class db {
 				if (defined('DBHOST')) $dbHost = DBHOST;
 				else 
 				{
-					$this->EnVision->exceptions_thrown++;
-					$this->EnVision->last_exception="no DBHOST defined ". __FILE__ .":". __LINE__;
+					$this->Telemetry->exceptions_thrown++;
+					$this->Telemetry->last_exception="no DBHOST defined ". __FILE__ .":". __LINE__;
 					throw new Exception("no defined constant for DBHOST",1);
 				}
 			}
 			catch (Exception $noDBHOST)
 			{
-				$this->EnVision->exceptions_caught++;
+				$this->Telemetry->exceptions_caught++;
 				try // attempt to get the db server address from ENV_DBHOST
 				{
 					$dbHost = getenv("ENV_DBHOST");
 					if (empty($dbHost))
 					{
-            $this->EnVision->exceptions_thrown++;
-            $this->EnVision->last_exception = "ENV_DBHOST undefined ". __FILE__ .":". __LINE__;						
+            $this->Telemetry->exceptions_thrown++;
+            $this->Telemetry->last_exception = "ENV_DBHOST undefined ". __FILE__ .":". __LINE__;						
 						throw new Exception("ENV_DBHOST is not set",1);
 					}
 				}
 				catch (Exception $noDBHOST) // ENV_DBHOST is not set
 				{
-					$this->EnVision->exceptions_caught++;
+					$this->Telemetry->exceptions_caught++;
 					try // attempt to get it from environment variable DBHOST
 					{
 						$dbHost = getenv("DBHOST");
 						if (empty($dbHost)) 
 						{
-              $this->EnVision->exceptions_thrown++;;
-              $this->EnVision->last_exception = "DBHOST undefined ". __FILE__ .":". __LINE__;
+              $this->Telemetry->exceptions_thrown++;;
+              $this->Telemetry->last_exception = "DBHOST undefined ". __FILE__ .":". __LINE__;
 							throw new Exception("DBHOST is not set",1);
 						}
 					}
 					catch (Exception $noDBHOST) // DBHOST isn't set
 					{
-						$this->EnVision->exceptions_caught++;
+						$this->Telemetry->exceptions_caught++;
 						try // attempt to get it from global variable 'dbHost'
 						{
 							@$dbHost = $GLOBALS['dbHost'];
 							if (empty($dbHost))
 							{
-                $this->EnVision->exceptions_thrown++;
-                $this->EnVision->last_exception="no GLOBALS(dbHost) ". __FILE__ .":". __LINE__;
+                $this->Telemetry->exceptions_thrown++;
+                $this->Telemetry->last_exception="no GLOBALS(dbHost) ". __FILE__ .":". __LINE__;
 								throw new Exception("GLOBALS['dbHost'] is not set",1);
 							}
 	// dbHost must be populated if this is hit
 						}
 						catch (Exception $noDBHOST) // hopefully the host 'db' will resolve
 						{
-							$this->EnVision->exceptions_caught++;
+							$this->Telemetry->exceptions_caught++;
 							$dbHost = "db";
 						}
 					}
@@ -190,53 +190,53 @@ class db {
 				if (defined('DBPORT')) $dbPort = @intval(DBPORT);
 				else 
 				{
-          $this->EnVision->exceptions_thrown++;
-          $this->EnVision->last_exception = "no DBPORT defined ". __FILE__ .":". __LINE__;
+          $this->Telemetry->exceptions_thrown++;
+          $this->Telemetry->last_exception = "no DBPORT defined ". __FILE__ .":". __LINE__;
 					throw new Exception("no defined constant for DBPORT",1);
 				}
 			}
 			catch (Exception $noDBPORT)
 			{
-				$this->EnVision->exceptions_caught++;
+				$this->Telemetry->exceptions_caught++;
 				try // try the environment variable ENV_DBPORT
 				{
 					$dbPort = @intval(getenv("ENV_DBPORT"));
 					if (empty($dbPort))
 					{
-            $this->EnVision->exceptions_thrown++;
-            $this->EnVision->last_exception="no ENV[dbPort] ". __FILE__ .":". __LINE__;
+            $this->Telemetry->exceptions_thrown++;
+            $this->Telemetry->last_exception="no ENV[dbPort] ". __FILE__ .":". __LINE__;
 						throw new Exception("ENV_DBHOST is not set",1);
 					}
 				}
 				catch (Exception $noDBPORT) // nope...
 				{
-					$this->EnVision->exceptions_caught++;
+					$this->Telemetry->exceptions_caught++;
 					try // try environment variable DBPORT
 					{
 						$dbPort = @intval(getenv('DBPORT'));
 						if (empty($dbPort))
 						{
-              $this->EnVision->exceptions_thrown++;
-              $this->EnVision->last_exception="no ENV{DBPORT} " . __FILE__ .":". __LINE__;
+              $this->Telemetry->exceptions_thrown++;
+              $this->Telemetry->last_exception="no ENV{DBPORT} " . __FILE__ .":". __LINE__;
 							throw new Exception("DBPORT is not set",1);
 						}
 					}
 					catch (Exception $noDBPORT) // nope...
 					{
-						$this->EnVision->exceptions_caught++;
+						$this->Telemetry->exceptions_caught++;
 						try // try the global variable 'dbPort'
 						{
 							$dbPort = @intval($GLOBALS['dbPort']);
 							if (empty($dbPort))
 							{
-                $this->EnVision->exceptions_thrown++;
-                $this->EnVision->last_exception="no GLOBALS(dbPort) " . __FILE__ .":". __LINE__;
+                $this->Telemetry->exceptions_thrown++;
+                $this->Telemetry->last_exception="no GLOBALS(dbPort) " . __FILE__ .":". __LINE__;
 								throw new Exception("GLOBALS['dbPort'] is not set",1);
 							}
 						}
 						catch (Exception $noDBPORT)
 						{
-							$this->EnVision->exceptions_caught++;
+							$this->Telemetry->exceptions_caught++;
 							$dbPort = 5433; // set to default pgsql port
 						}
 					}
@@ -253,58 +253,58 @@ class db {
 			{
 				if (defined("DBUSER")) $dbUser = DBUSER;
 				else {
-          $this->EnVision->exceptions_thrown++;
-          $this->EnVision->last_exception="no DBUSER defined " . __FILE__ .":". __LINE__;
+          $this->Telemetry->exceptions_thrown++;
+          $this->Telemetry->last_exception="no DBUSER defined " . __FILE__ .":". __LINE__;
 					throw new Exception("no defined constant for DBUSER");
 				}
 			}
 			catch (Exception $noDBUSER)
 			{
-				$this->EnVision->exceptions_caught++;
+				$this->Telemetry->exceptions_caught++;
 				try // try the environment variable ENV_DBUSER
 				{
 					$dbUser = getenv('ENV_DBUSER');
 					if (empty($dbUser)) {
-						$this->EnVision->exceptions_thrown++;
-						$this->EnVision->last_exception="no ENV_DBUSER defined " . __FILE__ .":". __LINE__;
+						$this->Telemetry->exceptions_thrown++;
+						$this->Telemetry->last_exception="no ENV_DBUSER defined " . __FILE__ .":". __LINE__;
 						throw new Exception("ENV_DBUSER is not set",1);
 					}
 				}
 				catch (Exception $noDBUSER)
 				{
-					$this->EnVision->exceptions_caught++;
+					$this->Telemetry->exceptions_caught++;
 					try // try the environment variable DBUSER
 					{
 						$dbUser = getenv('DBUSER');
 						if (empty($dbUser))
 						{
-							$this->EnVision->exceptions_thrown++;
-							$this->EnVision->last_exception="no ENV['DBUSER'] defined " . __FILE__ .":". __LINE__;
+							$this->Telemetry->exceptions_thrown++;
+							$this->Telemetry->last_exception="no ENV['DBUSER'] defined " . __FILE__ .":". __LINE__;
 							throw new Exception('DBUSER is not set',1);
 						}
 					}
 					catch (Exception $noDBUSER)
 					{
-						$this->EnVision->exceptions_caught++;
+						$this->Telemetry->exceptions_caught++;
 						try // try the global variable 'dbUser'
 						{
 							@$dbUser = $GLOBALS['dbUser'];
 							if (empty($dbUser)) 
 							{
-									$this->EnVision->exceptions_thrown++;
-									$this->EnVision->last_exception="no GLOBALS['dbUser'] defined " . __FILE__ .":". __LINE__;
+									$this->Telemetry->exceptions_thrown++;
+									$this->Telemetry->last_exception="no GLOBALS['dbUser'] defined " . __FILE__ .":". __LINE__;
 								throw new Exception("GLOBALS['dbUser'] is not set",1);
 							}
 						}
 						catch (Exception $noDBUSER)
 						{
-							$this->EnVision->exceptions_caught++;
+							$this->Telemetry->exceptions_caught++;
 							try // try the LOGNAME environment variable
 							{
 								$dbUser = getenv('LOGNAME');
 								if (empty($dbUser)) {
-									$this->EnVision->exceptions_thrown++;
-									$this->EnVision->last_exception="no ENV['LOGNAME'] set ". __FILE__ .":". __LINE__;
+									$this->Telemetry->exceptions_thrown++;
+									$this->Telemetry->last_exception="no ENV['LOGNAME'] set ". __FILE__ .":". __LINE__;
 									throw new Exception("LOGNAME is not set",1);
 								}
 							}
@@ -327,52 +327,52 @@ class db {
 			{
 				if (defined("DBPASS")) $dbPass = DBPASS;
 				else {
-					$this->EnVision->exceptions_thrown++;
-					$this->EnVision->last_exception="no ENV['LOGNAME'] set ". __FILE__ .":". __LINE__;
+					$this->Telemetry->exceptions_thrown++;
+					$this->Telemetry->last_exception="no ENV['LOGNAME'] set ". __FILE__ .":". __LINE__;
 					throw new Exception("no defined constant for DBPASS",1);
 				}
 			}
 			catch (Exception $noDBPASS)
 			{
-				$this->EnVision->exceptions_caught++;
+				$this->Telemetry->exceptions_caught++;
 				try // this should hopefully never work ... :-/
 				{
 					$dbPass = getenv('ENV_DBPASS');
 					if (empty($dbPass)) {
-						$this->EnVision->exceptions_thrown++;
-						$this->EnVision->last_exception="no ENV['ENV_DBPASS'] set ". __FILE__ .":". __LINE__;
+						$this->Telemetry->exceptions_thrown++;
+						$this->Telemetry->last_exception="no ENV['ENV_DBPASS'] set ". __FILE__ .":". __LINE__;
 						throw new Exception("ENV_DBPASS is not set",1);
 					}
 				}
 				catch (Exception $noDBPASS)
 				{
-					$this->EnVision->exceptions_caught++;
+					$this->Telemetry->exceptions_caught++;
 					try // this should hopefully never work either ... :-/
 					{
 						$dbPass = getenv('DBPASS');
 						if (empty($dbPass))
 						{
-							$this->EnVision->exceptions_thrown++;
-							$this->EnVision->last_exception="no ENV['DBPASS'] set ". __FILE__ .":". __LINE__;
+							$this->Telemetry->exceptions_thrown++;
+							$this->Telemetry->last_exception="no ENV['DBPASS'] set ". __FILE__ .":". __LINE__;
 							throw new Exception("DBPASS is not set",1);
 						}
 					}
 					catch (Exception $noDBPASS)
 					{
-						$this->EnVision->exceptions_caught++;
+						$this->Telemetry->exceptions_caught++;
 						try
 						{
 							@$dbPass = $GLOBALS['dbPass'];
 							if (empty($dbPass)) 
 							{
-								$this->EnVision->exceptions_thrown++;
-								$this->EnVision->last_exception="no GLOBALS['dbPass'] set ". __FILE__ .":". __LINE__;
+								$this->Telemetry->exceptions_thrown++;
+								$this->Telemetry->last_exception="no GLOBALS['dbPass'] set ". __FILE__ .":". __LINE__;
 								throw new Exception("GLOBALS['dbPass'] is not set",1);
 							}
 						}
 						catch (Exception $noDBPASS) // could not set the password, use 'password'
 						{
-							$this->EnVision->exceptions_thrown;
+							$this->Telemetry->exceptions_thrown;
 							$dbPass = "password";
 						}
 					}
@@ -390,53 +390,53 @@ class db {
 				if (defined("ENV_DBNAME")) $dbName = ENV_DBNAME;
 				else
 				{
-					$this->EnVision->exceptions_thrown++;
-					$this->EnVision->last_exception="ENV_DBNAME is not defined ". __FILE__ .":". __LINE__;
+					$this->Telemetry->exceptions_thrown++;
+					$this->Telemetry->last_exception="ENV_DBNAME is not defined ". __FILE__ .":". __LINE__;
 					throw new Exception("no defined constant for ENV_DBNAME",1);
 				}
 			}
 			catch (Exception $noDBNAME)
 			{
-				$this->EnVision->exceptions_caught++;
+				$this->Telemetry->exceptions_caught++;
 				try
 				{
 					$dbName = getenv('DBNAME');
 					if (empty($dbName)) 
 					{
-						$this->EnVision->exceptions_thrown++;
-						$this->EnVision->last_exception="DBNAME is not set ". __FILE__ .":". __LINE__;
+						$this->Telemetry->exceptions_thrown++;
+						$this->Telemetry->last_exception="DBNAME is not set ". __FILE__ .":". __LINE__;
 						throw new Exception("DBNAME is not set",1);
 					}
 				}
 				catch (Exception $noDBNAME)
 				{
-					$this->EnVision->exceptions_caught++;
+					$this->Telemetry->exceptions_caught++;
 					try
 					{
 						$dbName = getenv('DBNAME');
 						if (empty($dbName))
 						{
-							$this->EnVision->exceptions_thrown++;
-							$this->EnVision->last_exception="ENV['DBNAME'] is not set ". __FILE__ .":". __LINE__;
+							$this->Telemetry->exceptions_thrown++;
+							$this->Telemetry->last_exception="ENV['DBNAME'] is not set ". __FILE__ .":". __LINE__;
 							throw new Exception("DBNAME is not set",1);
 						}
 					}
 					catch (Exception $noDBNAME)
 					{
-						$this->EnVision->exceptions_caught++;
+						$this->Telemetry->exceptions_caught++;
 						try
 						{
 							@$dbName = $GLOBALS['dbName'];
 							if (empty($dbName)) 
 							{
-								$this->EnVision->exceptions_thrown++;
-                $this->EnVision->last_exception="GLOBALS['dbName'] is not set ". __FILE__ .":". __LINE__;
+								$this->Telemetry->exceptions_thrown++;
+                $this->Telemetry->last_exception="GLOBALS['dbName'] is not set ". __FILE__ .":". __LINE__;
 								throw new Exception("GLOBALS['dbName'] is not set",1);
 							}
 						}
 						catch (Exception $noDBNAME)
 						{
-							$this->EnVision->exceptions_caught++;
+							$this->Telemetry->exceptions_caught++;
 							$dbName = "localvault";
 						}
 					}
@@ -455,19 +455,19 @@ class db {
 			$this->__dbSock = new SQLite3($this->dbPath);
 			if (!is_a($this->__dbSock,"SQLite3"))
 			{
-				if (is_object($GLOBALS['EnVision'])) 
+				if (is_object($GLOBALS['Telemetry'])) 
 				{
-					$GLOBALS['EnVision']->last_exception="sqlite3_open_fail __FILE__:__LINE__";
+					$GLOBALS['Telemetry']->last_exception="sqlite3_open_fail __FILE__:__LINE__";
 					throw new Exception("Unable to instantiate sqlite3 connection @ {$this->dbPath}", 1);
 					return;
 				}
 			}
-			$this->EnVision->files_opened++;
-			$this->EnVision->db_objects_instantiated++;
-			$this->EnVision->names[]=$this->dbName;
-			$this->EnVision->paths[]=$this->dbPath;
-			$this->EnVision->types[]=$this->dbType;
-			$this->EnVision->socks[]=&$this->__dbSock;
+			$this->Telemetry->files_opened++;
+			$this->Telemetry->db_objects_instantiated++;
+			$this->Telemetry->names[]=$this->dbName;
+			$this->Telemetry->paths[]=$this->dbPath;
+			$this->Telemetry->types[]=$this->dbType;
+			$this->Telemetry->socks[]=&$this->__dbSock;
 		}
 		else
 		{
@@ -484,7 +484,7 @@ class db {
 //				if (!is_resource($this->__dbSock) || !is_object($this->__dbSock))
 				{
 					//var_dump($this);
-					$GLOBALS['EnVision']->last_exception="pgsql_open_fail __FILE__:__LINE__";
+					$GLOBALS['Telemetry']->last_exception="pgsql_open_fail __FILE__:__LINE__";
 					throw new Exception("Unable to connect to postgres database", 1);
 				}
 			} catch (Exception $dbFail)
@@ -494,30 +494,30 @@ class db {
 			}
 		}
 		// whew we finally instantiated the database object....
-		$this->EnVision->db_objects_instantiated++;
-		$this->EnVision->db_connections++;
-		$this->EnVision->db_ports[]=$this->dbPort;
-		$this->EnVision->db_hosts[]=$this->dbHost;
-		$this->EnVision->db_users[]=$this->dbUser;
-		$this->EnVision->db_names[]=$this->dbName;
-		$this->EnVision->db_types[]=$this->dbType;
-		$this->EnVision->db_socks[]=&$this->__dbSock;
+		$this->Telemetry->db_objects_instantiated++;
+		$this->Telemetry->db_connections++;
+		$this->Telemetry->db_ports[]=$this->dbPort;
+		$this->Telemetry->db_hosts[]=$this->dbHost;
+		$this->Telemetry->db_users[]=$this->dbUser;
+		$this->Telemetry->db_names[]=$this->dbName;
+		$this->Telemetry->db_types[]=$this->dbType;
+		$this->Telemetry->db_socks[]=&$this->__dbSock;
 	}
 
 	// false on error
 	public function __clone ()
 	{
-		$this->EnVision->functions_entered++;
+		$this->Telemetry->functions_entered++;
 		if (!$this->close()) return false;
 		if (!$this->connect()) return false;
-		$this->EnVision->objects_cloned++;
-		$this->EnVision->objects_instantiated++;
-		$this->EnVision->functions_left++;
+		$this->Telemetry->objects_cloned++;
+		$this->Telemetry->objects_instantiated++;
+		$this->Telemetry->functions_left++;
 	}
 
 	public function __destruct ()
 	{
-		$this->EnVision->functions_entered++;
+		$this->Telemetry->functions_entered++;
 		switch (strtolower($this->dbType))
 		{
 			case 'pgsql':
@@ -533,8 +533,8 @@ class db {
 				//if it isn't the same, that means that it was probably changed elsewhere
 				//and the changes should be reincorported instead of just lost like this.
 				//This should also be done one step out of this location too to save code.
-				if ($this->EnVision !== $GLOBALS['EnVision']) {
-					$GLOBALS['EnVision'] =& $this->EnVision;
+				if ($this->Telemetry !== $GLOBALS['Telemetry']) {
+					$GLOBALS['Telemetry'] =& $this->Telemetry;
 				}
 				break;
 			case 'sqlite3':
@@ -546,13 +546,13 @@ class db {
 				{
 					$this->__dbSock->close();
 				}
-				if ($this->EnVision !== $GLOBALS['EnVision']) {
-          $GLOBALS['EnVision'] =& $this->EnVision;
+				if ($this->Telemetry !== $GLOBALS['Telemetry']) {
+          $GLOBALS['Telemetry'] =& $this->Telemetry;
         }
 				break;
 		}
-	  if ($this->EnVision !== $GLOBALS['EnVision']) {
-			$GLOBALS['EnVision'] =& $this->EnVision;
+	  if ($this->Telemetry !== $GLOBALS['Telemetry']) {
+			$GLOBALS['Telemetry'] =& $this->Telemetry;
     }
 		
 //	unset ($this->sqlstr);
@@ -565,19 +565,19 @@ class db {
 		unset ($this->dbPass);
 		unset ($this->dbPort);
 		unset ($this->dbHost);
-		$this->EnVision->functions_left++;
+		$this->Telemetry->functions_left++;
 	}
 
 	private function initializeObject () : void
 	{
-		$this->EnVision = null;
-		$this->isEnVisioned = false;
-		if ((isset($GLOBALS['EnVision'])) && (is_object($GLOBALS['EnVision'])) && (is_a($GLOBALS['EnVision'],"EnVision"))) {
-      $this->EnVision =& $GLOBALS['EnVision'];
-      $this->isEnVisioned = true;
+		$this->Telemetry = null;
+		$this->hasTelemetry = false;
+		if ((isset($GLOBALS['Telemetry'])) && (is_object($GLOBALS['Telemetry'])) && (is_a($GLOBALS['Telemetry'],"Telemetry"))) {
+      $this->Telemetry =& $GLOBALS['Telemetry'];
+      $this->hasTelemetry = true;
     } else {
-      $this->EnVision = new EnVision();
-      $this->isEnVisioned = true;
+      $this->Telemetry = new Telemetry();
+      $this->hasTelemetry = true;
     }
 		$this->tlsconn = null;
 		$this->queryBytes = 0;
@@ -602,22 +602,22 @@ class db {
 
 	public function close () : bool
 	{
-		$this->EnVision->functions_entered++;
+		$this->Telemetry->functions_entered++;
 		if ($this->is_connected())
 		{
 			if (is_resource($this->result_set)) pg_free_result($this->result_set);
 			if (is_resource($this->__dbSock)) pg_close($this->__dbSock);
-			$this->EnVision->db_disconnections++;
-			$this->EnVision->functions_left++;
+			$this->Telemetry->db_disconnections++;
+			$this->Telemetry->functions_left++;
 			return true;
 		}
-		$this->EnVision->functions_left++;
+		$this->Telemetry->functions_left++;
 		return false;
 	}
 
 	public function connect () : bool
 	{
-		$this->EnVision->functions_entered++;
+		$this->Telemetry->functions_entered++;
 		try
 		{
 			$this->__dbSock = pg_connect($this->dataSource);
@@ -634,25 +634,25 @@ class db {
 		{
 			if ($e->getCode() === true)
 			{
-				$this->EnVision->db_connections++;
+				$this->Telemetry->db_connections++;
 			}
 			else
 			{
-				$this->EnVision->db_disconnections++;
+				$this->Telemetry->db_disconnections++;
 			}
 		}
 		finally
 		{
-			$this->EnVision->last_exception = $e->getMessage();
-			$this->EnVision->exceptions_thrown++;
-			$this->EnVision->functions_left++;
+			$this->Telemetry->last_exception = $e->getMessage();
+			$this->Telemetry->exceptions_thrown++;
+			$this->Telemetry->functions_left++;
 			return ($e->getCode());
 		}
 	}
 
 	public function is_connected() : bool
 	{
-		$this->EnVision->functions_entered++;
+		$this->Telemetry->functions_entered++;
 		switch (strtolower($this->dbType))
 		{
 			case 'pgsql':
@@ -665,24 +665,24 @@ class db {
 					// the pg_connection_status for __dbsock is stlil connected
 					if (pg_connection_status ($this->__dbSock) === PGSQL_CONNECTION_OK)
 					{
-						$this->EnVision->functions_left++;
+						$this->Telemetry->functions_left++;
 						return true;
 					}
 					else
 					{
-						$this->EnVision->functions_left++;
+						$this->Telemetry->functions_left++;
 						return false;
 					}
 				}
 			case 'sqlite3':
 				if (is_a($this->__dbSock,"SQLite3"))
 				{
-					$this->EnVision->functions_left++;
+					$this->Telemetry->functions_left++;
 					return true;
 				}
 				else
 				{
-					$this->EnVision->functions_left++;
+					$this->Telemetry->functions_left++;
 					return false;
 				}
 		}
@@ -697,15 +697,15 @@ class db {
    */
   public function escapeLiteral(string $value): string|false
   {
-    $this->EnVision->functions_entered++; // If you use EnVision for this
+    $this->Telemetry->functions_entered++; // If you use Telemetry for this
     if ($this->dbType === 'pgsql' && $this->is_connected()) {
       $escaped = pg_escape_literal($this->__dbSock, $value);
-      $this->EnVision->functions_left++;
+      $this->Telemetry->functions_left++;
       return $escaped;
     }
     // Handle SQLite3 if needed, though SQLite3::escapeString is for values, not full literals with quotes
     // For now, focus on pgsql as per your main setup.
-    $this->EnVision->functions_left++;
+    $this->Telemetry->functions_left++;
     $this->lastError = "Cannot escape_literal: Not connected or not PostgreSQL.";
     return false; 
   }
@@ -720,13 +720,13 @@ class db {
    */
   public function escapeString(string $value): string|false
   {
-    $this->EnVision->functions_entered++;
+    $this->Telemetry->functions_entered++;
     if ($this->dbType === 'pgsql' && $this->is_connected()) {
       $escaped = pg_escape_string($this->__dbSock, $value);
-      $this->EnVision->functions_left++;
+      $this->Telemetry->functions_left++;
       return $escaped;
     }
-    $this->EnVision->functions_left++;
+    $this->Telemetry->functions_left++;
     $this->lastError = "Cannot escape_string: Not connected or not PostgreSQL.";
     return false;
   }
@@ -736,15 +736,15 @@ class db {
 		$this->sqlstr = "SELECT EXISTS ( SELECT 1 FROM information_schema.tables WHERE table_schema = '{$schema}' and table_name='{$tableName}')";
 		if (!$this->query())
 		{
-			$this->EnVision->queries++;
-			$this->EnVision->db_failed_queries++;
-			$this->EnVision->functions_left++;
+			$this->Telemetry->queries++;
+			$this->Telemetry->db_failed_queries++;
+			$this->Telemetry->functions_left++;
 			return false;
 		}
-		$this->EnVision->queries++;
+		$this->Telemetry->queries++;
 		if ((strcmp(strtolower($this->row()['exists']),'t')) === 0) return true;
-		$this->EnVision->db_successful_queries++;
-		$this->EnVision->functions_left++;
+		$this->Telemetry->db_successful_queries++;
+		$this->Telemetry->functions_left++;
 		return false;
 	}
 
@@ -757,7 +757,7 @@ class db {
 	{
 		$this->queryBytes = 0;
 		$this->resultBytes = 0;
-		$this->EnVision->functions_entered++;
+		$this->Telemetry->functions_entered++;
 		// attempt to connect to the database
 		if (!$this->is_connected())
 		{
@@ -765,17 +765,17 @@ class db {
 			{
 				if (!$this->connect()) 
 				{
-					$this->EnVision->db_disconnections++;
-					$this->EnVision->exceptions_thrown++;
+					$this->Telemetry->db_disconnections++;
+					$this->Telemetry->exceptions_thrown++;
 					throw new Exception ("Failed to connect to ".$this->dbName." on ".$this->dbHost.":".$this->dbPort. " as user " .$this->dbUser, false);
 				}
 			}
 			catch (Exception $dbConnectionFailure)
 			{
-				$this->EnVision->last_exception = $dbConnectionFailure->getMessage();
-				$this->EnVision->exceptions_caught++;
-				$this->EnVision->functions_left++;
-				$this->EnVision->exceptions_thrown++;
+				$this->Telemetry->last_exception = $dbConnectionFailure->getMessage();
+				$this->Telemetry->exceptions_caught++;
+				$this->Telemetry->functions_left++;
+				$this->Telemetry->exceptions_thrown++;
 				// rethrow the exception (to where?)
 				throw $dbConnectionFailure;
 			}
@@ -788,22 +788,22 @@ class db {
 			switch(strtolower(preg_match('/^.* /',$this->sqlstr,$qType[0])))
 			{
 				case 'select':
-					 $this->EnVision->db_selects++;
+					 $this->Telemetry->db_selects++;
 					 break;
 				case 'update':
-					$this->EnVision->db_updates++;
+					$this->Telemetry->db_updates++;
 					break;
 				case 'insert':
-					$this->EnVision->db_inserts++;
+					$this->Telemetry->db_inserts++;
 					break;
 				case 'merge':
 					break;
 				case 'drop':
 				case 'delete':
-					$this->EnVision->db_deletes++;
+					$this->Telemetry->db_deletes++;
 					break;
 				case 'create':
-					$this->EnVision->db_creates++;
+					$this->Telemetry->db_creates++;
 					break;
 				case 'alter':
 				case 'grant':
@@ -814,7 +814,7 @@ class db {
 			$this->queryBytes += strlen($this->sqlstr);
 			$this->totalQueryBytes += strlen($this->sqlstr);
 			$this->totalBytes += strlen($this->sqlstr);
-			$this->EnVision->db_query_bytes_in += strlen($this->sqlstr);
+			$this->Telemetry->db_query_bytes_in += strlen($this->sqlstr);
 			switch (strtolower($this->dbType))
 			{
 				case 'pgsql':
@@ -824,36 +824,36 @@ class db {
 					$this->resultBytes += $resultBytes;
 					$this->totalResultBytes += $resultBytes;
 					$this->totalBytes += $resultBytes;
-					$this->EnVision->db_query_bytes_out += $resultBytes;
-					$this->EnVision->db_queries++;
+					$this->Telemetry->db_query_bytes_out += $resultBytes;
+					$this->Telemetry->db_queries++;
 					unset($resultBytes);
 					if (!is_resource($this->result_set))
 					{
 						//var_export($this->result_set);
-						$this->EnVision->db_failed_queries++;
-						$this->EnVision->functions_left++;
+						$this->Telemetry->db_failed_queries++;
+						$this->Telemetry->functions_left++;
 						//throw new Exception("an error occurred while querying for $this->sqlstr",0);
 					}
 					if ((preg_match('/^insert/', strtolower($this->sqlstr)) &&
-								($this->EnVision->db_inserts++)) ||
+								($this->Telemetry->db_inserts++)) ||
 					    (preg_match('/^update/', strtolower($this->sqlstr)) &&
-								($this->EnVision->db_updates++)) ||
+								($this->Telemetry->db_updates++)) ||
 					    (preg_match('/^delete/', strtolower($this->sqlstr)) &&
-								($this->EnVision->db_deletes++))) {
+								($this->Telemetry->db_deletes++))) {
 						$this->affected_rows = pg_affected_rows($this->result_set);
 					}
 					else 
 					{
 						$this->affected_rows = pg_num_rows($this->result_set);
 					}
-					$this->EnVision->db_rows+=$this->affected_rows;
+					$this->Telemetry->db_rows+=$this->affected_rows;
 					if (!empty ($this->result_set))
 					{
 						if (($this->affected_rows > 0) && ($this->result_set)) {
 							//we can safely calculate the bytes out here as well
 							$devnull = fopen("/dev/null", "w");
-							$this->EnVision->functions_left++;
-							$this->EnVision->db_successful_queries++;
+							$this->Telemetry->functions_left++;
+							$this->Telemetry->db_successful_queries++;
 							return true;
 						}
 					}
@@ -861,9 +861,9 @@ class db {
 					{
 							$this->affected_rows = 0;
 							$this->lastError = pg_last_error () . PHP_EOL . "SQLSTR = {" . PHP_EOL . $this->sqlstr . PHP_EOL . "}" . PHP_EOL;
-							$this->EnVision->functions_left++;
-							$this->EnVision->exceptions_thrown++;
-							$this->EnVision->db_failed_queries++;
+							$this->Telemetry->functions_left++;
+							$this->Telemetry->exceptions_thrown++;
+							$this->Telemetry->db_failed_queries++;
 							$this->lastError .= PHP_EOL . "Query returned zero results" . PHP_EOL;
 //							throw new Exception ($this->lastError,false);
 							throw new Exception("Query returned zero results",false);
@@ -871,13 +871,13 @@ class db {
 					}
 					break;
 				case 'sqlite3':
-					$this->EnVision->db_queries++;
-					if (((preg_match('/^insert/i', $this->sqlstr)) && ($this->EnVision->db_inserts++)) ||
-					((preg_match('/^update/i',$this->sqlstr)) && ($this->EnVision->db_updates++)) ||
-					((preg_match('/^create/i',$this->sqlstr)) && ($this->EnVision->db_creates++)))
+					$this->Telemetry->db_queries++;
+					if (((preg_match('/^insert/i', $this->sqlstr)) && ($this->Telemetry->db_inserts++)) ||
+					((preg_match('/^update/i',$this->sqlstr)) && ($this->Telemetry->db_updates++)) ||
+					((preg_match('/^create/i',$this->sqlstr)) && ($this->Telemetry->db_creates++)))
 					{
-						$this->EnVision->db_successful_queries++;
-						$this->EnVision->functions_left++;
+						$this->Telemetry->db_successful_queries++;
+						$this->Telemetry->functions_left++;
 						// cannot update affected_rows here yet the following action seems wrong
 						return $this->__dbSock->exec($this->sqlstr);
 					}
@@ -900,16 +900,16 @@ class db {
 									$this->affected_rows++;
 								}
 								$this->result_set->reset();
-								$this->EnVision->db_successful_queries++;
-								$this->EnVision->functions_left++;
+								$this->Telemetry->db_successful_queries++;
+								$this->Telemetry->functions_left++;
 								return true;
 							}
 							else
 							{
-								$this->EnVision->db_failed_queries++;
-								$this->EnVision->functions_left++;
+								$this->Telemetry->db_failed_queries++;
+								$this->Telemetry->functions_left++;
 								$this->affected_rows = 0;
-								$this->EnVision->exceptions_thrown++;
+								$this->Telemetry->exceptions_thrown++;
 								throw new Exception ("Query returned zero results",false);
 								return false;
 							}
@@ -923,13 +923,13 @@ class db {
 		}
 		else
 		{
-			$this->EnVision->db_failed_queries++;
-			$this->EnVision->functions_left++;
-			$this->EnVision->exceptions_thrown++;
+			$this->Telemetry->db_failed_queries++;
+			$this->Telemetry->functions_left++;
+			$this->Telemetry->exceptions_thrown++;
 			throw new Exception ("Cannot process empty query string",false);
 		}
-		$this->EnVision->functions_left++;
-		$this->EnVision->db_failed_queries++;
+		$this->Telemetry->functions_left++;
+		$this->Telemetry->db_failed_queries++;
 		return true;
 	}
 
@@ -939,7 +939,7 @@ class db {
 	{
 		$this->queryBytes = 0;
 		$this->resultBytes = 0;
-		$this->EnVision->functions_entered++;
+		$this->Telemetry->functions_entered++;
 		if ($this->is_connected())
 		{
 			if (!empty($this->sqlstr))
@@ -949,7 +949,7 @@ class db {
 				{
 				  try 
 					{
-				    $this->EnVision->db_queries++;
+				    $this->Telemetry->db_queries++;
 				    $memUsed = memory_get_usage();
 	
 	          // Execute the prepared statement with parameters
@@ -958,52 +958,52 @@ class db {
 	          $this->resultBytes += memory_get_usage() - $memUsed;
 	          $this->totalResultBytes += $this->resultBytes;
 	          $this->totalBytes += $this->resultBytes;
-	          $this->EnVision->db_query_bytes_out += $this->resultBytes;
+	          $this->Telemetry->db_query_bytes_out += $this->resultBytes;
 	
 	          if (!is_resource($this->result_set))
 						{
-	            $this->EnVision->db_failed_queries++;
-	            $this->EnVision->functions_left++;
+	            $this->Telemetry->db_failed_queries++;
+	            $this->Telemetry->functions_left++;
 	            $this->lastError = pg_last_error($this->__dbSock);
 	            trigger_error($this->lastError, E_USER_WARNING);
-							$this->EnVision->exceptions_thrown++;
+							$this->Telemetry->exceptions_thrown++;
 	            throw new Exception("Prepared statement execution failed", false);
 	          }
 	
 	          $this->affected_rows = pg_affected_rows($this->result_set);
 	          $this->returned_cols = pg_num_fields($this->result_set);
 	
-	          $this->EnVision->db_affected_rows += $this->affected_rows;
-	          $this->EnVision->db_returned_cols += $this->returned_cols;
+	          $this->Telemetry->db_affected_rows += $this->affected_rows;
+	          $this->Telemetry->db_returned_cols += $this->returned_cols;
 	
 	          if (!is_int($this->affected_rows))
 						{
-	            $this->EnVision->db_failed_queries++;
-	            $this->EnVision->functions_left++;
+	            $this->Telemetry->db_failed_queries++;
+	            $this->Telemetry->functions_left++;
 	            $this->lastError = pg_last_error($this->__dbSock);
 	            trigger_error($this->lastError, E_USER_WARNING);
-							$this->EnVision->exceptions_thrown++;
+							$this->Telemetry->exceptions_thrown++;
 	            throw new Exception("Invalid affected rows", false);
 	          } 
 						elseif ($this->affected_rows < 0) 
 						{
-	            $this->EnVision->db_failed_queries++;
-	            $this->EnVision->functions_left++;
+	            $this->Telemetry->db_failed_queries++;
+	            $this->Telemetry->functions_left++;
 	            $this->lastError = pg_last_error($this->__dbSock);
 	            trigger_error($this->lastError, E_USER_WARNING);
-							$this->EnVision->exceptions_thrown++;
+							$this->Telemetry->exceptions_thrown++;
 	            throw new Exception("Negative affected rows", false);
 	          }
 	
-	          $this->EnVision->functions_left++;
+	          $this->Telemetry->functions_left++;
 	          return true;
 	        } 
 					catch (Exception $e) 
 					{
-	          $this->EnVision->exceptions_caught++;
-						$this->EnVision->last_exception = $e->getMessage();
-						$this->EnVision->last_exception_code = $e->getCode();
-	          $this->EnVision->functions_left++;
+	          $this->Telemetry->exceptions_caught++;
+						$this->Telemetry->last_exception = $e->getMessage();
+						$this->Telemetry->last_exception_code = $e->getCode();
+	          $this->Telemetry->functions_left++;
 	          $this->lastError = $e->getMessage();
 	          return false;
 	        }
@@ -1021,24 +1021,24 @@ class db {
 	            $this->resultBytes += $resultBytes;
 	            $this->totalResultBytes += $resultBytes;
 	            $this->totalBytes += $resultBytes;
-	            $this->EnVision->db_query_bytes_out += $resultBytes;
-	            $this->EnVision->db_queries++;
+	            $this->Telemetry->db_query_bytes_out += $resultBytes;
+	            $this->Telemetry->db_queries++;
 	            unset($resultBytes);
 	            if (!is_resource($this->result_set))
 							{
 	              //var_export($this->result_set);
-	              $this->EnVision->db_failed_queries++;
-		            $this->EnVision->functions_left++;
+	              $this->Telemetry->db_failed_queries++;
+		            $this->Telemetry->functions_left++;
 		            $this->lastError = pg_last_error($this->__dbSock);
 		            //trigger_error($this->lastError, E_USER_WARNING);
 			          return false;
 			        }
 			        if ((preg_match('/^insert/', strtolower($this->sqlstr)) &&
-			          ($this->EnVision->db_inserts++)) ||
+			          ($this->Telemetry->db_inserts++)) ||
 			          (preg_match('/^update/', strtolower($this->sqlstr)) &&
-			          ($this->EnVision->db_updates++)) ||
+			          ($this->Telemetry->db_updates++)) ||
 				        (preg_match('/^delete/', strtolower($this->sqlstr)) &&
-			          ($this->EnVision->db_deletes++))
+			          ($this->Telemetry->db_deletes++))
 					    )
 							{
 					      $this->affected_rows = pg_affected_rows($this->result_set);
@@ -1047,15 +1047,15 @@ class db {
 							{
 					      $this->affected_rows = pg_num_rows($this->result_set);
 					    }
-					    $this->EnVision->db_rows += $this->affected_rows;
+					    $this->Telemetry->db_rows += $this->affected_rows;
 					    if (!empty($this->result_set))
 							{
 					      if (($this->affected_rows > 0) && ($this->result_set))
 								{
 					        //we can safely calculate the bytes out here as well
 					        $devnull = fopen("/dev/null", "w");
-					        $this->EnVision->functions_left++;
-					        $this->EnVision->db_successful_queries++;
+					        $this->Telemetry->functions_left++;
+					        $this->Telemetry->db_successful_queries++;
 					        return true;
 					      }
 					    } 
@@ -1063,9 +1063,9 @@ class db {
 							{
 					      $this->affected_rows = 0;
 					      $this->lastError = pg_last_error() . PHP_EOL . "SQLSTR = {" . PHP_EOL . $this->sqlstr . PHP_EOL . "}" . PHP_EOL;
-					      $this->EnVision->functions_left++;
-					      $this->EnVision->exceptions_thrown++;
-					      $this->EnVision->db_failed_queries++;
+					      $this->Telemetry->functions_left++;
+					      $this->Telemetry->exceptions_thrown++;
+					      $this->Telemetry->db_failed_queries++;
 					      $this->lastError .= PHP_EOL . "Query returned zero results" . PHP_EOL;
 					      //							throw new Exception ($this->lastError,false);
 					      trigger_error($this->lastError, E_USER_WARNING);
@@ -1073,14 +1073,14 @@ class db {
 					    }
 					    break;
 					  case 'sqlite3':
-					    $this->EnVision->db_queries++;
-					    if (((preg_match('/^insert/i', $this->sqlstr)) && ($this->EnVision->db_inserts++)) ||
-					      ((preg_match('/^update/i', $this->sqlstr)) && ($this->EnVision->db_updates++)) ||
-					      ((preg_match('/^create/i', $this->sqlstr)) && ($this->EnVision->db_creates++))
+					    $this->Telemetry->db_queries++;
+					    if (((preg_match('/^insert/i', $this->sqlstr)) && ($this->Telemetry->db_inserts++)) ||
+					      ((preg_match('/^update/i', $this->sqlstr)) && ($this->Telemetry->db_updates++)) ||
+					      ((preg_match('/^create/i', $this->sqlstr)) && ($this->Telemetry->db_creates++))
 					    )
 							{
-					      $this->EnVision->db_successful_queries++;
-					      $this->EnVision->functions_left++;
+					      $this->Telemetry->db_successful_queries++;
+					      $this->Telemetry->functions_left++;
 					      // cannot update affected_rows here yet the following action seems wrong
 					      return $this->__dbSock->exec($this->sqlstr);
 					    } 
@@ -1103,16 +1103,16 @@ class db {
 					            $this->affected_rows++;
 					          }
 					          $this->result_set->reset();
-					          $this->EnVision->db_successful_queries++;
-					          $this->EnVision->functions_left++;
+					          $this->Telemetry->db_successful_queries++;
+					          $this->Telemetry->functions_left++;
 					          return true;
 					        } 
 									else 
 									{
-					          $this->EnVision->db_failed_queries++;
-					          $this->EnVision->functions_left++;
+					          $this->Telemetry->db_failed_queries++;
+					          $this->Telemetry->functions_left++;
 					          $this->affected_rows = 0;
-					          $this->EnVision->exceptions_thrown++;
+					          $this->Telemetry->exceptions_thrown++;
 					          throw new Exception("Query returned zero results", false);
 					          return false;
 					        }
@@ -1128,15 +1128,15 @@ class db {
 	    }
 			else
 			{
-	      $this->EnVision->db_failed_queries++;
-	      $this->EnVision->functions_left++;
-	      $this->EnVision->exceptions_thrown++;
+	      $this->Telemetry->db_failed_queries++;
+	      $this->Telemetry->functions_left++;
+	      $this->Telemetry->exceptions_thrown++;
 	      throw new Exception("Cannot process empty query string", false);
 	    }
 	  }
 		else
 		{
-			$this->EnVision->functions_left++;
+			$this->Telemetry->functions_left++;
 			$this->lastError = "Not connected to the database";
 			trigger_error($this->lastError, E_USER_WARNING);
 			return false;
@@ -1145,22 +1145,22 @@ class db {
 */
 	public function meta (string $table = null) : array
 	{
-		$this->EnVision->functions_entered++;
+		$this->Telemetry->functions_entered++;
 		if (!$this->is_connected())
 		{
-			$this->EnVision->db_disconnects++;
+			$this->Telemetry->db_disconnects++;
 			$this->functions_left++;
 			return array();
 		}
 		$meta = pg_meta_data($this->__dbSock, $table);
 		if (!is_array($meta))
 		{
-			$this->EnVision->functions_left++;
+			$this->Telemetry->functions_left++;
 			return array();
 		}
 		else
 		{
-			$this->EnVision->functions_left++;
+			$this->Telemetry->functions_left++;
 			return $meta;
 		}
 	}
@@ -1170,33 +1170,33 @@ class db {
 	{
 		if (!$this->connect())
 		{
-			$this->EnVision->db_disconnects++;
-			$this->EnVision->db_functions_left++;
+			$this->Telemetry->db_disconnects++;
+			$this->Telemetry->db_functions_left++;
 			return array();
 		}
-		$this->EnVision->db_connections++;
+		$this->Telemetry->db_connections++;
 		switch (strtolower($this->dbType))
 		{
 			case 'pgsql':
 				$result = pg_fetch_assoc($this->result_set);
 				$this->affected_rows = pg_affected_rows ($this->result_set);
-				$this->EnVision->db_rows+=$this->affected_rows;
+				$this->Telemetry->db_rows+=$this->affected_rows;
 				if (is_array($result))
 				{
 					foreach($result as $index => $val) {
 						if (!empty($index))
 						{
-							$this->EnVision->db_fields++;
-//							$this->EnVision->db_query_bytes_out+=intval(strlen($val));
+							$this->Telemetry->db_fields++;
+//							$this->Telemetry->db_query_bytes_out+=intval(strlen($val));
 						}
 					}
-					$this->EnVision->functions_left++;
+					$this->Telemetry->functions_left++;
 					return $result;
 				}
 				else
 				{
 					$this->affected_rows = 0;
-					$this->EnVision->functions_left++;
+					$this->Telemetry->functions_left++;
 					return array();
 				}
 				break;
@@ -1206,7 +1206,7 @@ class db {
 				while ($this->result_set->fetchArray() !== false)
 				{
 					$this->affected_rows++;
-					$this->EnVision->db_rows++;
+					$this->Telemetry->db_rows++;
 				}
 				$this->result_set->reset();
 				if (($result = $this->result_set->fetchArray()) !== false)
@@ -1214,23 +1214,23 @@ class db {
 					if (is_array($result)) {
 						foreach ($result as $index => $val)
 							if (!empty($index)) {
-								$this->EnVision->db_query_bytes_out+=intval(sizeof($val) + sizeof($index));
-								$this->EnVision->db_fields++;
+								$this->Telemetry->db_query_bytes_out+=intval(sizeof($val) + sizeof($index));
+								$this->Telemetry->db_fields++;
 							}
 					}
-					$this->EnVision->functions_left++;
+					$this->Telemetry->functions_left++;
 					return $result;
 				}
 				else
 				{
 					$this->affected_rows = 0;
-					$this->EnVision->functions_left++;
+					$this->Telemetry->functions_left++;
 					return array();
 				}
 				break;
 			default:
 				$this->affected_rows = 0;
-				$EnVision->functions_left++;
+				$Telemetry->functions_left++;
 				return array();
 		}
 	}
@@ -1240,11 +1240,11 @@ class db {
 	// overwritten by subsequent results.
 	public function result (string $keyName = null) : array
 	{
-		$this->EnVision->functions_entered++;
+		$this->Telemetry->functions_entered++;
 		if (!$this->is_connected())
 		{
-			$this->EnVision->db_disconnects++;
-			$this->EnVision->functions_left++;
+			$this->Telemetry->db_disconnects++;
+			$this->Telemetry->functions_left++;
 			return array();
 		}
 		$result = array();
@@ -1260,7 +1260,7 @@ class db {
 		{
 			case 'pgsql':
 				$this->affected_rows = pg_affected_rows($this->result_set);
-				$this->EnVision->db_rows+=$this->affected_rows;
+				$this->Telemetry->db_rows+=$this->affected_rows;
 				while ($inf = pg_fetch_assoc($this->result_set))
 				{
 					// if the provided keyName is a database field, use the value as the index instead of the string
@@ -1270,13 +1270,13 @@ class db {
 					}
 					for ($i=0; $i < count($inf); $i++)
 					{
-						$this->EnVision->db_fields++;
+						$this->Telemetry->db_fields++;
 						$fName = pg_field_name($this->result_set,$i);
 						$result[$recNum][$fName] = $inf[$fName];
 					}
 					if (is_int($recNum)) $recNum++;
 				}
-				$this->EnVision->functions_left++;
+				$this->Telemetry->functions_left++;
 				return $result;
 			case 'sqlite3':
 				// mimic pgsql's pg_fetch_assoc ...
@@ -1289,63 +1289,63 @@ class db {
 					}
 					for ($i=0; $i < count($inf); $i++)
 					{
-						$this->EnVision->db_fields++;
+						$this->Telemetry->db_fields++;
 						$fName = $this->result_set->columnName($i);
 						$result[$recNum][$fName] = $inf[$fName];
 					}
 					if (is_int($recNum)) $recNum++;
 					$this->affected_rows++;
-					$this->EnVision->db_rows++;
+					$this->Telemetry->db_rows++;
 				}
-				$this->EnVision->fuctions_left++;
+				$this->Telemetry->fuctions_left++;
 				return $result;
 			default:
 				$this->affected_rows = 0;
-				$this->EnVision->fuctions_left++;
+				$this->Telemetry->fuctions_left++;
 				return array();
 		}
 	}
 
 	public function getHost () : string
 	{
-		$this->EnVision->fuctions_entered++;
-		$this->EnVision->fuctions_left++;
+		$this->Telemetry->fuctions_entered++;
+		$this->Telemetry->fuctions_left++;
 		return $this->dbHost;
 	}
 
 	public function setUser (string $username) : void
 	{
-    $this->EnVision->fuctions_entered++;
-    $this->EnVision->fuctions_left++;
+    $this->Telemetry->fuctions_entered++;
+    $this->Telemetry->fuctions_left++;
 		$this->dbUser = $username;
 	}
 
 	public function setPass (string $passwd) : void
 	{
-    $this->EnVision->fuctions_entered++;
-    $this->EnVision->fuctions_left++;
+    $this->Telemetry->fuctions_entered++;
+    $this->Telemetry->fuctions_left++;
 		$this->dbPass = $passwd;
 	}
 
 	public function setName (string $dbname) : void
 	{
-    $this->EnVision->fuctions_entered++;
-    $this->EnVision->fuctions_left++;
+    $this->Telemetry->fuctions_entered++;
+    $this->Telemetry->fuctions_left++;
 		$this->dbName = $dbname;
 	}
 
 	public function setHost (string $host) : void
 	{
-    $this->EnVision->fuctions_entered++;
-    $this->EnVision->fuctions_left++;	
+    $this->Telemetry->fuctions_entered++;
+    $this->Telemetry->fuctions_left++;	
 		$this->dbHost = $host;
 	}
 
 	public function setPort (string $port) : void
 	{
-    $this->EnVision->fuctions_entered++;
+    $this->Telemetry->fuctions_entered++;
 		if (!is_numeric($port)) {
-			$this->EnVision->fuctions_left++;
+			$this->Telemetry->fuctions_left++;
 			return;
 		}
 		elseif ($port > 0 && $port < 65536)
@@ -1353,7 +1353,7 @@ class db {
 			$this->dbPort = $port;
 		}
 		else {
-			$this->EnVision->fuctions_left++;
+			$this->Telemetry->fuctions_left++;
 			return;
 		}
 	}

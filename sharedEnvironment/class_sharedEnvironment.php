@@ -64,8 +64,8 @@ class SharedEnvironment {
 	//										//  |   \==> /OS Name	  * this is where the OS names are found Linux, Windows, HPUX, AIX, etc.
 	//										//	|     \==> /OS Architecture  * This is where the architecture type is found x86, x64, ppc, mips, mips64, arm, arm64, s390, s390x, etc...
 	//										//	|				\==> / OS Distribution * this is where the distribution-specific files are. e.g. Fedora39, Fedora40, Ubuntu_2204, Ubuntu_2404, etc...
-	public $visionRoot;		//  |==>/vision/${ENV_MYIP}	* host's EnVision root directory
-	public $visionDir;		//	\==>/vision/${ENV_MYIP}/${LOGNAME}  * The data directory used for the current user.
+	public $telemetryRoot;		//  |==>/telemetry/${ENV_MYIP}	* host's Telemetry root directory
+	public $telemetryDir;		//	\==>/telemetry/${ENV_MYIP}/${LOGNAME}  * The data directory used for the current user.
 
 	private $debug;				// debugging output flag
 	private $host;				// external host object
@@ -218,11 +218,11 @@ class SharedEnvironment {
 				case 'ENV_OSTYPE':
 					(!empty($val)) ? $this->osType = $val : $this->osType = null;
 					break;
-				case 'ENV_VISIONROOT':
-					(!empty($val)) ? $this->visionRoot = $val : $this->visionRoot = null;
+				case 'UNIVERSE_TELEMETRY_ROOT':
+					(!empty($val)) ? $this->telemetryRoot = $val : $this->telemetryRoot = null;
 					break;
-				case 'ENV_VISIONDIR':
-					(!empty($val)) ? $this->visionDir = $val : $this->visionDir = null;
+				case 'UNIVERSE_TELEMETRY_DIR':
+					(!empty($val)) ? $this->telemetryDir = $val : $this->telemetryDir = null;
 					break;
 				default:
 					break;

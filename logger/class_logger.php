@@ -24,8 +24,8 @@ define("LOG_STOP",255);
 
 class Logger {
 
-	private $isEnVisioned;
-	public EnVision $EnVision;
+	private $hasTelemetry;
+	public Telemetry $Telemetry;
 
 	private $instanceId;
 
@@ -68,51 +68,51 @@ class Logger {
 	{
 		$this->initializeObject();
 			// attempt to rescope the object into the logger's view. test now... save time
-		if (isset($GLOBALS['EnVision'])) {
-			$this->EnVision =& $GLOBALS['EnVision'];
+		if (isset($GLOBALS['Telemetry'])) {
+			$this->Telemetry =& $GLOBALS['Telemetry'];
 		} else {
-			$this->EnVision = new EnVision();
+			$this->Telemetry = new Telemetry();
 		}
-		$this->isEnVisioned = true;
-		$this->EnVision->functions_entered+=2;
-		$this->EnVision->functions_left++;
-		$this->EnVision->objects_instantiated++;
+		$this->hasTelemetry = true;
+		$this->Telemetry->functions_entered+=2;
+		$this->Telemetry->functions_left++;
+		$this->Telemetry->objects_instantiated++;
 //		} else {
-//			$this->isEnVisioned = false;
+//			$this->hasTelemetry = false;
 //		}
 		try
 		{
 			if (($this->openLog ($logfile))===false) {
-//				if ($this->isEnVisioned === true) {
-				$this->EnVision->exceptions_thrown++;
-				$this->EnVision->last_exception="Failed to open logfile   __CLASS__ : __LINE__";
+//				if ($this->hasTelemetry === true) {
+				$this->Telemetry->exceptions_thrown++;
+				$this->Telemetry->last_exception="Failed to open logfile   __CLASS__ : __LINE__";
 				throw new Exception ("Failed to open '$logFile' for writing", false);
 			}
-			$this->EnVision->files_opened++;
-			$this->EnVision->log_files_opened++;
+			$this->Telemetry->files_opened++;
+			$this->Telemetry->log_files_opened++;
 		//	} //else {
-//				if ($this->isEnVisioned === true) {
-//					$this->EnVision->files_opened++;
+//				if ($this->hasTelemetry === true) {
+//					$this->Telemetry->files_opened++;
 //				}
 ///			}
 		}
 		catch (Exception $openFail)
 		{
-			$this->EnVision->exceptions_caught++;
-			$this->EnVision->exceptions_thrown++;
-			$this->EnVision->last_exception="Failed to open '$logFile'";
+			$this->Telemetry->exceptions_caught++;
+			$this->Telemetry->exceptions_thrown++;
+			$this->Telemetry->last_exception="Failed to open '$logFile'";
 			throw new Exception ("Failed to open '$logFile': $openFail->getMessage()" . PHP_EOL, 1);
 		}
 		$this->coloredLogs = $coloredLogs;
 		if ($this->coloredLogs == false) $this->unsetColors();
 		if ($initMessage === true) $this->writeLog("Logger Version " . $this->getLoggerVersion() . " started for $logfile", LOG_INIT);
-		$this->EnVision->functions_left++;
+		$this->Telemetry->functions_left++;
 	}
 
 	public function __destruct ()
 	{
-		$this->EnVision->functions_entered++;
-		$this->EnVision->functions_left++;
+		$this->Telemetry->functions_entered++;
+		$this->Telemetry->functions_left++;
 		return;
 	}
 
@@ -122,10 +122,10 @@ class Logger {
 		{
 			fclose ($this->logfp);
 		}
-		$this->EnVision->files_closed++;
-		$this->EnVision->log_files_closed++;
-		$this->EnVision->objects_cloned++;
-		$this->EnVision->objects_instantiated++;
+		$this->Telemetry->files_closed++;
+		$this->Telemetry->log_files_closed++;
+		$this->Telemetry->objects_cloned++;
+		$this->Telemetry->objects_instantiated++;
 // I don't think this is what I want
 //		$this->instanceId = posix_getpid();
 //		do
@@ -140,25 +140,25 @@ class Logger {
 //			}
 //		} while (file_exists($curlog));
 		$this->openLog ($this->logfile);
-		$this->EnVision->files_created++;
-		$this->EnVision->files_opened++;
-		$this->EnVision->log_files_created++;
-		$this->EnVision->log_files_opened++;
+		$this->Telemetry->files_created++;
+		$this->Telemetry->files_opened++;
+		$this->Telemetry->log_files_created++;
+		$this->Telemetry->log_files_opened++;
 		$this->writeLog ("Successfully cloned " . $this->logfile,LOG_NOTICE);
-		$this->EnVision->functions_left++;
+		$this->Telemetry->functions_left++;
 	}
 
 	public function close (int $code = null)
 	{
-		$this->EnVision->functions_entered++;
+		$this->Telemetry->functions_entered++;
 		if ($code === null)
 		{
-			$this->EnVision->functions_left++;
+			$this->Telemetry->functions_left++;
 			return false;
 		}
 		$this->writeLog("Logging ended",LOG_STOP);
-		$this->EnVision->files_closed++;
-		$this->EnVision->log_files_closed++;
+		$this->Telemetry->files_closed++;
+		$this->Telemetry->log_files_closed++;
 		fclose ($this->logfp);
 		unset ($this->logfile);
 		unset ($this->coloredLogs);
@@ -182,7 +182,7 @@ class Logger {
 		unset ($this->colorDEBUG_QUERY);
 		unset ($this->colorDEBUG_VAR);
 		unset ($this->customColors);
-		$this->EnVision->functions_left++;
+		$this->Telemetry->functions_left++;
 		return $code;
 	}
 
@@ -222,36 +222,36 @@ class Logger {
 		{
 			$this->logfp = fopen($logfile,"a+");
 			if ($this->logfp === false) {
-//				if ($this->isEnVisioned === true) {
-					$this->EnVision->last_exception = "Failed to open $logfile in append mode " . __FILE__ .":". __LINE__;
-					$this->EnVision->exceptions_thrown++;
+//				if ($this->hasTelemetry === true) {
+					$this->Telemetry->last_exception = "Failed to open $logfile in append mode " . __FILE__ .":". __LINE__;
+					$this->Telemetry->exceptions_thrown++;
 //				}
 				throw new Exception ("Failed open|create $logfile in append mode", $this->logfp);
 			}
 		}
 		catch (Exception $openFail)
 		{
-//			if ($this->isEnVisioned === true) {
-			$this->EnVision->exceptions_caught++;
+//			if ($this->hasTelemetry === true) {
+			$this->Telemetry->exceptions_caught++;
 //			}
-			$this->EnVision->functions_left++;
+			$this->Telemetry->functions_left++;
 			return false;
 		}
 		if (is_resource($this->logfp))
 		{
-//			if ($this->isEnVisioned === true) {
-				$this->EnVision->files_opened++;
-				$this->EnVision->log_files_created++;
+//			if ($this->hasTelemetry === true) {
+				$this->Telemetry->files_opened++;
+				$this->Telemetry->log_files_created++;
 //			}
 			$this->logfile = $logfile;
 			unset($logfile);
-			$this->EnVision->functions_left++;
+			$this->Telemetry->functions_left++;
 			return true;
 		} // I don't believe that this code will ever be reached unless in the nano second between the open and then check
 		  // for resource status the file somehow gets closed (possible FS link failure) Don't underestimate the impossible
 		  // though.  It *COULD* happen. This would likely save the day in that situation.
 		unset($logfile);
-		$this->EnVision->functions_left++;
+		$this->Telemetry->functions_left++;
 		return false;
 	}
 
@@ -269,25 +269,25 @@ class Logger {
 			try
 			{
 				if (fclose($this->logfp) === false) {
-					$this->EnVision->exceptions_thrown++;
-					$this->EnVision->last_exception="Failed to close resource associated with {$this->logfile}";
+					$this->Telemetry->exceptions_thrown++;
+					$this->Telemetry->last_exception="Failed to close resource associated with {$this->logfile}";
 					throw new Exception ("Failed to close resource associated with {$this->logfile}",1);
 				}
 			}
 			// if we failed, print the message and return false
 			catch (Exception $logEx)
 			{
-				$this->EnVision->exceptions_caught++;
+				$this->Telemetry->exceptions_caught++;
 				echo $logEx->getMessage() . PHP_EOL;
-				$this->EnVision->functions_left++;
+				$this->Telemetry->functions_left++;
 				return false;
 			}
-			$this->EnVision->log_files_closed++;
+			$this->Telemetry->log_files_closed++;
 		}
 		// the file pointer is invalid.. throw an exception to the caller
 		else
 		{
-			$this->EnVision->functions_left++;
+			$this->Telemetry->functions_left++;
 			return $this->writeLog ("Unable to rotate invalid resource associated with {$this->logfile}",1);
 		}
 
@@ -300,17 +300,17 @@ class Logger {
 			if (rename($this->logfile, $new_name) === false)
 			{
 				$this->writeLog("Attempt to rotate log file to $new_name failed", LOG_ERR);
-				$this->EnVision->exceptions_thrown++;
-				$this->EnVision->last_exception="Unable to rename {$this->logfile} to $new_name";
+				$this->Telemetry->exceptions_thrown++;
+				$this->Telemetry->last_exception="Unable to rename {$this->logfile} to $new_name";
 				throw new Exception ("Unable to rename {$this->logfile} to $new_name",1);
 			}
 		}
 		// renaming failed, print a message and return false
 		catch (Exception $logEx)
 		{
-			$this->EnVision->exceptions_caught++;
+			$this->Telemetry->exceptions_caught++;
 			echo $logEx->getMessage() . PHP_EOL;
-			$this->EnVision->functions_left++;
+			$this->Telemetry->functions_left++;
 			return false;
 		}
 
@@ -320,29 +320,29 @@ class Logger {
 			// if reopening fails, throw an exception otherwise return true
 			if (!$this->openLog($this->logfile))
 			{
-				$this->EnVision->exceptions_thrown++;
-        $this->EnVision->last_exception="Failed to reopen {$this->logfile}";
+				$this->Telemetry->exceptions_thrown++;
+        $this->Telemetry->last_exception="Failed to reopen {$this->logfile}";
 				throw new Exception ("Failed to reopen {$this->logfile}", 1);
 			}
-			$this->EnVision->log_files_created++;
-			$this->EnVision->log_files_opened++;
+			$this->Telemetry->log_files_created++;
+			$this->Telemetry->log_files_opened++;
 			// attempt to write a message to the new log file
 			$rdate = new DateTime("now");
-			$this->EnVision->functions_left++;
+			$this->Telemetry->functions_left++;
 			return ($this->writeLog("New log started on " . $rdate->format('Y-m-d H:i:s-u'), LOG_INIT));
 		}
 		catch (Exception $logEx)
 		{
-			$this->EnVision->exceptions_caught++;
+			$this->Telemetry->exceptions_caught++;
 			echo $logEx->getMessage() . PHP_EOL;
-			$this->EnVision->functions_left++;
+			$this->Telemetry->functions_left++;
 			return false;
 		}
 	}
 
 	private function unsetColors () : void
 	{
-		$this->EnVision->functions_entered++;
+		$this->Telemetry->functions_entered++;
 		$this->colorDEBUG			= "";  // 7
 		$this->colorDEBUG_INOUT		= "";
 		$this->colorDEBUG_WARN		= "";
@@ -362,12 +362,12 @@ class Logger {
 		$this->colorSTOP			= "";
 		$this->colorUNKNOWN			= "";
 		$this->colorOKAY			= "";
-		$this->EnVision->functions_left++;
+		$this->Telemetry->functions_left++;
 	}
 
 	public static function printLevels () : void
 	{
-		$this->EnVision->functions_entered++;
+		$this->Telemetry->functions_entered++;
 		echo "Available log levels:" . PHP_EOL;
 		echo "LOG_INIT         |-1" . PHP_EOL;
 		echo "LOG_EMERG        | 0" . PHP_EOL;
@@ -386,47 +386,47 @@ class Logger {
 		echo "LOG_STATS        | 254" . PHP_EOL;
 		echo "LOG_STOP         | 255" . PHP_EOL;
 		echo PHP_EOL;
-		$this->EnVision->functions_left++;
+		$this->Telemetry->functions_left++;
 	}
 	
 	public function getLoggerVersion () : string
 	{
-		$this->EnVision->functions_entered++;
-		$this->EnVision->functions_left++;
+		$this->Telemetry->functions_entered++;
+		$this->Telemetry->functions_left++;
 		return $this->loggerVersion;
 	}
 
 	public function getLogFileLocation () : string
 	{
-		$this->EnVision->functions_entered++;
-		$this->EnVision->functions_left++;
+		$this->Telemetry->functions_entered++;
+		$this->Telemetry->functions_left++;
 		return $this->logfile;
 	}
 
 	public function debug (string $what, int $debugLevel = LOG_DEBUG)
 	{
-		$this->EnVision->functions_entered++;
+		$this->Telemetry->functions_entered++;
 		if (empty($what)) {
-			$this->EnVision->functions_left++;
+			$this->Telemetry->functions_left++;
 			return false;
 		}
 		$logMessage = "$what";
 		if (preg_match('/[Ee]ntering [Ff]unction/',$what)) $this->indentLevel++;
 		if ((preg_match('/[Ll]eaving [Ff]unction/',$what)) && ($this->indentLevel > 0)) $this->indentLevel--;
 		$this->writeLog ($logMessage,$debugLevel);
-		$this->EnVision->functions_left++;
+		$this->Telemetry->functions_left++;
 	}
 
 	public function write (string $what, int $logLevel = LOG_INFO) : bool
 	{
-		$this->EnVision->functions_entered++;
-		$this->EnVision->functions_left++;
+		$this->Telemetry->functions_entered++;
+		$this->Telemetry->functions_left++;
 		return ($this->writeLog ($what, $logLevel));
 	}
 
 	public function writeLog (string $what, int $logLevel = LOG_INFO) : bool
 	{
-		$this->EnVision->functions_entered++;
+		$this->Telemetry->functions_entered++;
 		if ((!is_string($what)) || (empty($what)))
 		{
 			return false;
@@ -459,92 +459,92 @@ class Logger {
 		}
 		if ($this->coloredLogs == true)
 		{
-			$this->EnVision->log_lines_in_color++;
+			$this->Telemetry->log_lines_in_color++;
 			switch ($logLevel)
 			{
 				case LOG_DEBUG:
 					$isDebug = true;
-					$this->EnVision->log_debug_lines_logged++;
+					$this->Telemetry->log_debug_lines_logged++;
 					$logMessage = "[" . $this->colorDEBUG . "DBUG". $this->colorEND ."] ";// . "$what";// . $this->colorEND . PHP_EOL;
 					$color = $this->colorDEBUG;
 					break;
 				case LOG_DEBUG_VAR:
 					$isDebug = true;
-					$this->EnVision->log_debug_variables++;
+					$this->Telemetry->log_debug_variables++;
 					$logMessage = "[" . $this->colorDEBUG . "DBUG" . $this->colorEND . "] ";// . "$what".  $this->colorEND . PHP_EOL;
 					$color = $this->colorDEBUG_VAR;
 					break;
 				case LOG_DEBUG_INOUT:
 					$isDebug = true;
-					$this->EnVision->log_debug_functions_inout++;
+					$this->Telemetry->log_debug_functions_inout++;
 					$logMessage = "[" . $this->colorDEBUG . "DBUG" . $this->colorEND . "] ";// . "$what".  $this->colorEND . PHP_EOL;
 					$color = $this->colorDEBUG_INOUT;
 					break;
 				case LOG_DEBUG_WARN:
 					$isDebug = true;
-					$this->EnVision->log_debug_warnings++;
+					$this->Telemetry->log_debug_warnings++;
 					$logMessage = "[" . $this->colorDEBUG . "DBUG" . $this->colorEND . "] ";// . "$what".  $this->colorEND . PHP_EOL;
 					$color = $this->colorDEBUG_WARN;
 					break;
 				case LOG_DEBUG_HILITE:
 					$isDebug = true;
-					$this->EnVision->log_debug_hilights++;
+					$this->Telemetry->log_debug_hilights++;
 					$logMessage = "[" . $this->colorDEBUG . "DBUG" . $this->colorEND . "] ";// . "$what".  $this->colorEND . PHP_EOL;
 					$color = $this->colorDEBUG_HILITE;
 					break;
 				case LOG_DEBUG_QUERY:
 					$isDebug = true;
-					$this->EnVision->log_debug_sql_queries++;
+					$this->Telemetry->log_debug_sql_queries++;
 					$logMessage = "[" . $this->colorDEBUG . "DBUG" . $this->colorEND . "] ";// . "$what".  $this->colorEND . PHP_EOL;
 					$color = $this->colorDEBUG_QUERY;
 					break;
 				case LOG_INIT:
-					$this->EnVision->log_init_lines++;
+					$this->Telemetry->log_init_lines++;
 					$logMessage = "[" . $this->colorINIT . "INIT" . $this->colorEND . "] ";// . $what . PHP_EOL;
 					break;
 				case LOG_INFO:
-					$this->EnVision->log_info_lines++;
+					$this->Telemetry->log_info_lines++;
 					$logMessage = "[" . $this->colorINFO . "INFO" . $this->colorEND . "] ";// . $what . PHP_EOL;
 					break;
 				case LOG_WARNING:
 				case LOG_WARN:
-					$this->EnVision->log_warning_lines++;
+					$this->Telemetry->log_warning_lines++;
 					$logMessage = "[" . $this->colorWARNING . "WARN" . $this->colorEND . "] " . $this->colorWARNING;// . $what . PHP_EOL;
 					break;
 				case LOG_EMERG:
-					$this->EnVision->log_emergency_lines++;
+					$this->Telemetry->log_emergency_lines++;
 					$logMessage = "[" . $this->colorEMERG . "EMRG" . $this->colorEND . "] " . $this->colorEMERG;// . $what . PHP_EOL;
 					break;
 				case LOG_ALERT:
-					$this->EnVision->log_alert_lines++;
+					$this->Telemetry->log_alert_lines++;
 					$logMessage = "[" . $this->colorALERT . "ALRT" . $this->colorEND . "] ";// . $what . PHP_EOL;
 					break;
 				case LOG_CRIT:
-					$this->EnVision->log_crit_lines++;
+					$this->Telemetry->log_crit_lines++;
 					$logMessage = "[" . $this->colorCRITICAL . "CRIT" . $this->colorEND . "] "; // . $what . PHP_EOL;
 					break;
 				case LOG_NOTICE:
-					$this->EnVision->log_notice_lines++;
+					$this->Telemetry->log_notice_lines++;
 					$logMessage = "[" . $this->colorNOTICE . "NOTE" . $this->colorEND . "] " . $this->colorNOTICE;// . $what . PHP_EOL;
 					break;	
 				case LOG_ERR:
-					$this->EnVision->log_error_lines++;
+					$this->Telemetry->log_error_lines++;
 					$logMessage = "[" . $this->colorERR  . "ERR " . $this->colorEND . "] " . $this->colorERR;// . "$what" . $this->colorEND . PHP_EOL;
 					break;
 				case LOG_ATTN:
-					$this->EnVision->log_attention_lines++;
+					$this->Telemetry->log_attention_lines++;
 					$logMessage = "[" . $this->colorATTN . "ATTN" . $this->colorEND . "] " . $this->colorATTN;// . "$what" . $this->colorEND . PHP_EOL;
 					break;
 				case LOG_STATS:
-					$this->EnVision->log_stats_lines++;
+					$this->Telemetry->log_stats_lines++;
 					$logMessage = "[" . $this->colorSTATS . "STAT" . $this->colorEND . "] " . $this->colorSTATS;// . "$what" . $this->colorEND . PHP_EOL;
 					break;
 				case LOG_STOP:
-					$this->EnVision->log_stop_lines++;
+					$this->Telemetry->log_stop_lines++;
 					$logMessage = "[" . $this->colorSTOP . "STOP" . $this->colorEND . "] ";// . $what . PHP_EOL;
 					break;
 				default:
-					$this->EnVision->log_unclassified_lines++;
+					$this->Telemetry->log_unclassified_lines++;
 					$logMessage = "[" . $this->colorUNKNOWN . "----" . $this->colorEND . "] ";// . $what . PHP_EOL;
 					break;
 			}
@@ -560,80 +560,80 @@ class Logger {
 		}
 		else
 		{
-			$this->EnVision->log_lines_in_monochrome++;
+			$this->Telemetry->log_lines_in_monochrome++;
 			switch ($logLevel)
 			{
 				case LOG_INIT:
-					$this->EnVision->log_init_lines++;
+					$this->Telemetry->log_init_lines++;
 					$logMessage = "[INIT] ";
 					break;
 				case LOG_DEBUG:
-					$this->EnVision->log_debug_lines_logged++;
+					$this->Telemetry->log_debug_lines_logged++;
 					$logMessage = "[DBUG] ";
 					break;
 				case LOG_DEBUG_VAR:
-					$this->EnVision->log_debug_variables++;
+					$this->Telemetry->log_debug_variables++;
 					$logMessage = "[DBUG][VARVAL] ";
 					break;
 				case LOG_DEBUG_INOUT:
-					$this->EnVision->log_debug_functions_inout++;
+					$this->Telemetry->log_debug_functions_inout++;
 					$logMessage = "[DBUG][INOUT] ";
 					break;
 				case LOG_DEBUG_WARN:
-					$this->EnVision->log_debug_warnings++;
+					$this->Telemetry->log_debug_warnings++;
 					$logMessage = "[DBUG][WARNING] ";
 					break;
 				case LOG_DEBUG_HILITE:
-					$this->EnVision->log_debug_hilights++;
+					$this->Telemetry->log_debug_hilights++;
 					$logMessage = "[DBUG][HILITED VALUE] ";
 					break;
 				case LOG_DEBUG_QUERY:
-					$this->EnVision->log_debug_sql_queries++;
+					$this->Telemetry->log_debug_sql_queries++;
 					$logMessage = "[DBUG][SQL_QUERY] ";
 					break;
 				case LOG_INFO:
-					$this->EnVision->log_info_lines++;
+					$this->Telemetry->log_info_lines++;
 					$logMessage = "[INFO] ";
 					break;
 				case LOG_WARNING:
 				case LOG_WARN:
-					$this->EnVision->log_warning_lines++;
+					$this->Telemetry->log_warning_lines++;
 					$logMessage = "[WARN] ";
 					break;
 				case LOG_ERR:
-					$this->EnVision->log_error_lines++;
+					$this->Telemetry->log_error_lines++;
 					$logMessage = "[ERR ] ";
 					break;
 				case LOG_NOTICE:
-					$this->EnVision->log_notice_lines++;
+					$this->Telemetry->log_notice_lines++;
 					$logMessage = "[NOTE] ";
 					break;
 				case LOG_EMERG:
-					$this->EnVision->log_emergency_lines++;
+					$this->Telemetry->log_emergency_lines++;
 					$logMessage = "[EMRG] ";
 					break;
 				case LOG_ALERT:
-					$this->EnVision->log_alert_lines++;
+					$this->Telemetry->log_alert_lines++;
 					$logMessage = "[ALRT] ";
 					break;
 				case LOG_CRIT:
-					$this->EnVision->log_crit_lines++;
+					$this->Telemetry->log_crit_lines++;
 					$logMessage = "[CRIT] ";
 					break;
 				case LOG_ATTN:
-					$this->EnVision->log_attention_lines++;
+					$this->Telemetry->log_attention_lines++;
 					$logMessage = "[ATTN] ";
 					break;
 				case LOG_STATS:
-					$this->EnVision->log_stats_lines++;
+					$this->Telemetry->log_stats_lines++;
 					$logMessage = "[STAT] ";
 					break;
 				case LOG_STOP:
-					$this->EnVision->log_stop_lines++;
+					$this->Telemetry->log_stop_lines++;
 					$logMessage = "[STOP] ";
 					break;
 				default:
-					$this->EnVision->log_unclassified_lines++;
+					$this->Telemetry->log_unclassified_lines++;
 					$logMessage = "[----] ";
 					break;
 			}
@@ -653,16 +653,16 @@ class Logger {
 		{
 			$lbw = fwrite($this->logfp, $logMessage);
 			if ($lbw !== false) {
-				$this->EnVision->log_lines_written++;
-				$this->EnVision->log_bytes_written+=$lbw;
-				$this->EnVision->functions_left++;
+				$this->Telemetry->log_lines_written++;
+				$this->Telemetry->log_bytes_written+=$lbw;
+				$this->Telemetry->functions_left++;
 			}
 			return true;
 		}
 		else
 		{
 			echo "ALERT: " . $logMessage;
-			$this->EnVision->functions_left++;
+			$this->Telemetry->functions_left++;
 			return false;
 		}
 	}
@@ -670,7 +670,7 @@ class Logger {
 	// [0-7];3[0-7];4[0-7]m || [0-7];3[0-7]m || [0-7]m
 	private function setColor (string $colorCode, int $logLevel) : void
 	{
-		$this->EnVision->functions_entered++;
+		$this->Telemetry->functions_entered++;
 		if ((preg_match("/^\[[0-7];3[0-7]m$/", $colorCode)) || (preg_match("/^\[;3[0-7]m$/",$colorCode)) || (preg_match("/^\[[0-7];3[0-7];4[0-7]m/",$colorCode)))
 		{
 			switch($logLevel)
@@ -740,18 +740,18 @@ class Logger {
 			// do not return possibly dangerous/unintended escape sequences to caller
 			$this->writeLog("Invalid color code passed to Logger::setColor.",LOG_ERR);
 		}
-		$this->EnVision->functions_left++;
+		$this->Telemetry->functions_left++;
 	}
 
 	// array consists of: array (LOG_INIT => "[1;36m", LOG_INFO => "[1;37m", ...)
 	// levels are listed above in the defines.
 	public function setCustomColors (array $colorArray):bool
 	{
-		$this->EnVision->functions_entered++;
+		$this->Telemetry->functions_entered++;
 		if (empty($colorArray))
 		{
 			$this->writeLog ("Empty array passed to Logger::setCustomColors",LOG_ERR);
-			$this->EnVision->functions_left++;
+			$this->Telemetry->functions_left++;
 			return (false);
 		}
 		foreach ($colorArray as $level => $color)
@@ -780,7 +780,7 @@ class Logger {
 					break;
 			}
 		}
-		$this->EnVision->functions_left++;
+		$this->Telemetry->functions_left++;
 		return (true);
 	}
 }
