@@ -13,6 +13,9 @@ class Country
         private $people;
         private $jobs;
         private $resourceStockpiles;
+        private $birthAccumulator;
+        private $unrestAccumulator;
+        private $populationSeedTimer;
 
         public function __construct (string $name, Planet $planet, array $profile = array())
         {
@@ -33,6 +36,9 @@ class Country
                         'materials' => max(0.0, floatval($profile['starting_materials'] ?? 0.0)),
                         'wealth' => max(0.0, floatval($profile['starting_wealth'] ?? 0.0))
                 );
+                $this->birthAccumulator = 0.0;
+                $this->unrestAccumulator = 0.0;
+                $this->populationSeedTimer = 0.0;
                 $this->planet->registerCountry($this);
                 $this->initializeEconomy();
         }
@@ -239,6 +245,7 @@ class Country
                 $this->improveStability($progress * 0.85);
                 $this->rebalanceEmployment();
                 $this->runEconomy($deltaTime);
+                $this->advancePopulation($deltaTime);
                 $alive = array();
                 foreach ($this->people as $person)
                 {
@@ -359,6 +366,111 @@ class Country
                 $population = max(1, count($this->people));
                 $threshold = $population * 0.5;
                 return ($this->getResourceStockpile('food') < $threshold);
+        }
+
+        private function advancePopulation (float $deltaTime) : void
+        {
+                if ($deltaTime <= 0) return;
+                $population = count($this->people);
+                if ($population <= 0)
+                {
+                        if ($this->isReadyForPopulation())
+                        {
+                                $this->populationSeedTimer += $deltaTime;
+                                if ($this->populationSeedTimer >= 86400.0)
+                                {
+                                        $this->populationSeedTimer = 0.0;
+                                        $seed = intval(max(1, min(
+                                                $this->populationCapacity,
+                                                max(5, round($this->populationCapacity * 0.01))
+                                        )));
+                                        if ($seed > 0)
+                                        {
+                                                $this->spawnPeople($seed);
+                                        }
+                                }
+                        }
+                        else
+                        {
+                                $this->populationSeedTimer = 0.0;
+                        }
+                        $this->birthAccumulator = 0.0;
+                        $this->unrestAccumulator = 0.0;
+                        return;
+                }
+
+                $this->populationSeedTimer = 0.0;
+                $days = $deltaTime / 86400.0;
+                if ($days <= 0) return;
+
+                $capacityRemaining = max(0, $this->populationCapacity - $population);
+                if ($capacityRemaining <= 0)
+                {
+                        $this->birthAccumulator = 0.0;
+                }
+                else
+                {
+                        $foodPerCitizen = $this->getResourceStockpile('food') / max(1, $population);
+                        $foodFactor = max(0.0, min(1.2, $foodPerCitizen / 2.0));
+                        $capacityFactor = ($this->populationCapacity <= 0)
+                                ? 0.0
+                                : min(1.0, $capacityRemaining / max(1, $this->populationCapacity * 0.3));
+                        $developmentFactor = 0.4 + 0.6 * $this->getDevelopmentScore();
+                        $stabilityFactor = 0.4 + 0.6 * $this->stability;
+                        $baseBirthRate = 0.00028;
+                        $birthRate = $baseBirthRate * $foodFactor * $capacityFactor * $developmentFactor * $stabilityFactor;
+                        $expectedBirths = $population * $birthRate * $days;
+                        $this->birthAccumulator += $expectedBirths;
+                        $births = intval(floor($this->birthAccumulator));
+                        if ($births > 0)
+                        {
+                                $this->birthAccumulator -= $births;
+                                $births = min($births, $capacityRemaining);
+                                if ($births > 0)
+                                {
+                                        $this->spawnPeople($births);
+                                }
+                        }
+                }
+
+                $unrestPressure = max(0.0, 0.45 - $this->stability);
+                if ($unrestPressure > 0)
+                {
+                        $unrestRate = $unrestPressure * 0.00018;
+                        $this->unrestAccumulator += $population * $unrestRate * $days;
+                        $losses = intval(floor($this->unrestAccumulator));
+                        if ($losses > 0)
+                        {
+                                $this->unrestAccumulator -= $losses;
+                                $this->applyCasualties($losses, 'civil unrest');
+                        }
+                }
+                else
+                {
+                        $this->unrestAccumulator = max(0.0, $this->unrestAccumulator - ($days * 0.5));
+                }
+        }
+
+        private function applyCasualties (int $count, string $cause) : void
+        {
+                if ($count <= 0) return;
+                $total = count($this->people);
+                if ($total <= 0) return;
+                $count = min($count, $total);
+                $indices = array_rand($this->people, $count);
+                if (!is_array($indices))
+                {
+                        $indices = array($indices);
+                }
+                foreach ($indices as $index)
+                {
+                        $person = $this->people[$index];
+                        if ($person instanceof Person)
+                        {
+                                $person->setHealth(0.0);
+                        }
+                }
+                Utility::write($this->name . " lost $count citizens to $cause", LOG_INFO, L_CONSOLE);
         }
 }
 ?>

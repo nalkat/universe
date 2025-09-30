@@ -8,6 +8,10 @@ class Person extends Life
         private $hunger;
         private $dailyFoodNeed;
         private $nutritionInterval;
+        private $lifeExpectancyYears;
+        private $senescenceStartYears;
+        private $agingInterval;
+        private $agingAccumulator;
 
         public function __construct (string $name, ?Country $homeCountry = null, array $traits = array())
         {
@@ -19,6 +23,10 @@ class Person extends Life
                 $this->hunger = 0.25;
                 $this->dailyFoodNeed = max(0.1, floatval($traits['daily_food_need'] ?? 1.0));
                 $this->nutritionInterval = max(1.0, floatval($traits['nutrition_interval'] ?? 86400.0));
+                $this->lifeExpectancyYears = max(35.0, floatval($traits['life_expectancy_years'] ?? 82.0));
+                $this->senescenceStartYears = max(25.0, min($this->lifeExpectancyYears, floatval($traits['senescence_years'] ?? 65.0)));
+                $this->agingInterval = max(3600.0, floatval($traits['aging_interval'] ?? 86400.0));
+                $this->agingAccumulator = 0.0;
                 if ($homeCountry instanceof Country)
                 {
                         $this->setHomeCountry($homeCountry);
@@ -177,6 +185,12 @@ class Person extends Life
                 {
                         $this->recoverHealth($deltaTime);
                 }
+                $this->agingAccumulator += $deltaTime;
+                if ($this->agingAccumulator >= $this->agingInterval)
+                {
+                        $this->applyAging($this->agingAccumulator);
+                        $this->agingAccumulator = 0.0;
+                }
         }
 
         private function satiate (float $consumed) : void
@@ -208,6 +222,25 @@ class Person extends Life
                 $timeFactor = $deltaTime / 86400.0;
                 if ($timeFactor <= 0) return;
                 $this->modifyHealth(0.02 * $timeFactor);
+        }
+
+        private function applyAging (float $elapsedSeconds) : void
+        {
+                $ageYears = $this->age / 31557600.0;
+                if ($ageYears < $this->senescenceStartYears) return;
+                $span = max(1.0, $this->lifeExpectancyYears - $this->senescenceStartYears);
+                $excess = max(0.0, $ageYears - $this->senescenceStartYears);
+                $pressure = min(2.0, $excess / $span);
+                $timeFactor = $elapsedSeconds / 31557600.0;
+                $damage = max(0.0, $pressure * 0.05 * $timeFactor);
+                if ($damage > 0.0)
+                {
+                        $this->modifyHealth(-$damage);
+                }
+                if ($ageYears >= ($this->lifeExpectancyYears * 1.35))
+                {
+                        $this->setHealth(0.0);
+                }
         }
 }
 ?>
