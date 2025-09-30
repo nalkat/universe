@@ -5,6 +5,9 @@ class Planet extends SystemObject
         private $atmosphere;
         private $habitable;
         private $orbit;
+        private $environment;
+        private $countries;
+        private $habitabilityScore;
 
         public function __construct (string $name, float $mass = 0.0, float $radius = 0.0, ?array $position = null, ?array $velocity = null)
         {
@@ -13,6 +16,15 @@ class Planet extends SystemObject
                 $this->atmosphere = array();
                 $this->habitable = false;
                 $this->orbit = null;
+                $this->environment = array(
+                        'temperature' => 0.0,
+                        'water' => 0.0,
+                        'atmosphere' => 0.0,
+                        'magnetosphere' => 0.0,
+                        'biosignatures' => 0.0
+                );
+                $this->countries = array();
+                $this->habitabilityScore = 0.0;
         }
 
         public function setAtmosphere (array $composition) : void
@@ -33,6 +45,90 @@ class Planet extends SystemObject
         public function isHabitable () : bool
         {
                 return $this->habitable;
+        }
+
+        public function setEnvironment (array $environment) : void
+        {
+                foreach ($this->environment as $key => $value)
+                {
+                        if (!array_key_exists($key, $environment)) continue;
+                        $incoming = $environment[$key];
+                        if (in_array($key, array('temperature'), true))
+                        {
+                                $this->environment[$key] = floatval($incoming);
+                                continue;
+                        }
+                        $this->environment[$key] = $this->normalizeFraction($incoming);
+                }
+                $this->updateHabitabilityScore();
+        }
+
+        public function getEnvironment () : array
+        {
+                return $this->environment;
+        }
+
+        public function getHabitabilityScore () : float
+        {
+                return $this->habitabilityScore;
+        }
+
+        public function isReadyForCivilization () : bool
+        {
+                return ($this->habitable && ($this->habitabilityScore >= 0.6));
+        }
+
+        public function registerCountry (Country $country) : void
+        {
+                $name = $country->getName();
+                $this->countries[$name] = $country;
+        }
+
+        public function createCountry (string $name, array $profile = array()) : ?Country
+        {
+                if (!$this->isReadyForCivilization())
+                {
+                        Utility::write(
+                                $this->getName() . " lacks the environmental stability for countries",
+                                LOG_INFO,
+                                L_CONSOLE
+                        );
+                        return null;
+                }
+                $cleanName = Utility::cleanse_string($name);
+                if (isset($this->countries[$cleanName]))
+                {
+                        Utility::write("Country $cleanName already exists on " . $this->getName(), LOG_WARNING, L_CONSOLE);
+                        return $this->countries[$cleanName];
+                }
+                $country = new Country($cleanName, $this, $profile);
+                return $country;
+        }
+
+        public function getCountries () : array
+        {
+                return $this->countries;
+        }
+
+        public function getCountry (string $name) : ?Country
+        {
+                $cleanName = Utility::cleanse_string($name);
+                if (!isset($this->countries[$cleanName])) return null;
+                return $this->countries[$cleanName];
+        }
+
+        public function getPopulationSummary () : array
+        {
+                $population = 0;
+                foreach ($this->countries as $country)
+                {
+                        $population += $country->getPopulation();
+                }
+                return array(
+                        'population' => $population,
+                        'countries' => count($this->countries),
+                        'habitability' => $this->habitabilityScore
+                );
         }
 
         public function getOrbit () : ?array
@@ -80,9 +176,43 @@ class Planet extends SystemObject
                 {
                         $this->updateOrbit($deltaTime);
                         $this->age += $deltaTime;
-                        return;
                 }
-                parent::tick($deltaTime);
+                else
+                {
+                        parent::tick($deltaTime);
+                }
+                foreach ($this->countries as $country)
+                {
+                        $country->tick($deltaTime);
+                }
+        }
+
+        private function normalizeFraction ($value) : float
+        {
+                return max(0.0, min(1.0, floatval($value)));
+        }
+
+        private function updateHabitabilityScore () : void
+        {
+                $temperatureScore = 0.0;
+                $temperature = $this->environment['temperature'];
+                if ($temperature >= -50 && $temperature <= 70)
+                {
+                        $temperatureScore = 1.0 - (abs($temperature - 15) / 85);
+                        $temperatureScore = max(0.0, min(1.0, $temperatureScore));
+                }
+                $scores = array(
+                        $temperatureScore,
+                        $this->environment['water'],
+                        $this->environment['atmosphere'],
+                        $this->environment['magnetosphere'],
+                        $this->environment['biosignatures']
+                );
+                $this->habitabilityScore = array_sum($scores) / count($scores);
+                if ($this->habitabilityScore >= 0.6)
+                {
+                        $this->habitable = true;
+                }
         }
 
         private function updateOrbit (float $deltaTime) : void
