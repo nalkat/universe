@@ -1,8 +1,8 @@
 <?php // 7.3.0 - required/config.php
 // check if the shared environment is "installed" 
 if ((getenv('ENV_INSTALLED')) === false) exit ("Shared environment is not detected, please ensure it is configured");
-require_once __DIR__ . "/required/defines.php";
-require_once __DIR__ . "/required/class_preRequisites.php";
+require_once __DIR__ . "/defines.php";
+require_once __DIR__ . "/class_preRequisites.php";
 
 // while this class does not have any extension dependencies, the following is an example
 // of how to use this class:

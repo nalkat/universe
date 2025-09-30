@@ -1,0 +1,3176 @@
+ (cd "$(git rev-parse --show-toplevel)" && git apply --3way <<'EOF' 
+diff --git a/README.md b/README.md
+index 3bb1b457ab11cf20c31076c96da0c1cd6af06211..71d9d60d44325e693518eee89746ebf24c7fd4b7 100644
+--- a/README.md
++++ b/README.md
+@@ -1,5 +1,34 @@
+ This program is a simulater for the universe and an experiment in object spawning.
+ The purpose of this appliation is to create objects which create and run other objects
+ which in turn create other objects, and so on and so forth. This will allow for a great
+ many different types of things possible, from simulating clients for load testing, for
+ studying how differing objects with a common ancestors interact with each other.
++
++## Running the universe daemon
++
++The `universe.php` executable now operates as a daemon. Use the `start` command to launch
++it in the background and the companion console utility to interact with the running
++simulation.
++
++```
++php universe.php start --delta=3600 --interval=1 --auto-steps=1
++```
++
++The daemon listens on a UNIX socket located at `runtime/universe.sock` by default. Use
++the console client to query status, fetch snapshots, advance the simulation, or issue a
++shutdown.
++
++```
++php tools/universe_console.php status
++php tools/universe_console.php snapshot
++php tools/universe_console.php advance --steps=5 --delta=1800
++php tools/universe_console.php shutdown
++```
++
++Pass `--no-daemonize` to `universe.php start` to run the service in the foreground (useful
++when developing locally). To run a single batch of steps and print a summary, use the
++`run-once` command instead:
++
++```
++php universe.php run-once --steps=5 --delta=7200
++```
+diff --git a/class_country.php b/class_country.php
+index 0b634e9523880331e1cc363159aea3bdc653055b..545ea95c5509b3d26afeaaf81b25593a67994696 100644
+--- a/class_country.php
++++ b/class_country.php
+@@ -1,6 +1,181 @@
+ <?php // 7.3.0-dev
+ class Country
+ {
++        private $name;
++        private $planet;
++        private $infrastructure;
++        private $technology;
++        private $resourceIndex;
++        private $stability;
++        private $populationCapacity;
++        private $population;
++        private $developmentRate;
++        private $people;
+ 
++        public function __construct (string $name, Planet $planet, array $profile = array())
++        {
++                $this->name = Utility::cleanse_string($name);
++                $this->planet = $planet;
++                $this->infrastructure = $this->sanitizeFraction($profile['infrastructure'] ?? 0.0);
++                $this->technology = $this->sanitizeFraction($profile['technology'] ?? 0.0);
++                $this->resourceIndex = $this->sanitizeFraction($profile['resources'] ?? 0.0);
++                $this->stability = $this->sanitizeFraction($profile['stability'] ?? 0.0);
++                $this->populationCapacity = intval($profile['population_capacity'] ?? 0);
++                $this->population = intval($profile['population'] ?? 0);
++                $this->developmentRate = max(0.0, floatval($profile['development_rate'] ?? 1.0));
++                $this->people = array();
++                $this->planet->registerCountry($this);
++        }
++
++        public function getName () : string
++        {
++                return $this->name;
++        }
++
++        public function getPlanet () : Planet
++        {
++                return $this->planet;
++        }
++
++        public function getPopulation () : int
++        {
++                return $this->population;
++        }
++
++        public function getPopulationCapacity () : int
++        {
++                return $this->populationCapacity;
++        }
++
++        public function setPopulationCapacity (int $capacity) : void
++        {
++                $this->populationCapacity = max(0, $capacity);
++        }
++
++        public function getDevelopmentScore () : float
++        {
++                return (
++                        $this->infrastructure +
++                        $this->technology +
++                        $this->resourceIndex +
++                        $this->stability
++                ) / 4;
++        }
++
++        public function isReadyForPopulation () : bool
++        {
++                if (!$this->planet->isReadyForCivilization()) return false;
++                if ($this->populationCapacity <= 0) return false;
++                $threshold = 0.55;
++                return (
++                        ($this->infrastructure >= $threshold) &&
++                        ($this->technology >= $threshold) &&
++                        ($this->resourceIndex >= $threshold) &&
++                        ($this->stability >= $threshold)
++                );
++        }
++
++        public function getReadinessReport () : array
++        {
++                return array(
++                        'planet_ready' => $this->planet->isReadyForCivilization(),
++                        'infrastructure' => $this->infrastructure,
++                        'technology' => $this->technology,
++                        'resources' => $this->resourceIndex,
++                        'stability' => $this->stability,
++                        'population_capacity' => $this->populationCapacity,
++                        'population' => $this->population
++                );
++        }
++
++        public function improveInfrastructure (float $delta) : void
++        {
++                $this->infrastructure = $this->sanitizeFraction($this->infrastructure + $delta);
++        }
++
++        public function improveTechnology (float $delta) : void
++        {
++                $this->technology = $this->sanitizeFraction($this->technology + $delta);
++        }
++
++        public function improveResources (float $delta) : void
++        {
++                $this->resourceIndex = $this->sanitizeFraction($this->resourceIndex + $delta);
++        }
++
++        public function improveStability (float $delta) : void
++        {
++                $this->stability = $this->sanitizeFraction($this->stability + $delta);
++        }
++
++        public function hasCapacityFor (int $count) : bool
++        {
++                return (($this->population + $count) <= $this->populationCapacity);
++        }
++
++        public function spawnPeople (int $count = 1, ?callable $namingStrategy = null) : array
++        {
++                if ($count <= 0) return array();
++                if (!$this->isReadyForPopulation())
++                {
++                        Utility::write(
++                                $this->name . " is not ready to support people",
++                                LOG_INFO,
++                                L_CONSOLE
++                        );
++                        return array();
++                }
++                if (!$this->hasCapacityFor($count))
++                {
++                        Utility::write(
++                                $this->name . " lacks housing capacity for " . $count . " additional people",
++                                LOG_INFO,
++                                L_CONSOLE
++                        );
++                        return array();
++                }
++                $created = array();
++                for ($i = 0; $i < $count; $i++)
++                {
++                        $name = ($namingStrategy === null)
++                                ? $this->generateCitizenName()
++                                : strval($namingStrategy($this->population + $i + 1, $this));
++                        $person = new Person($name, $this);
++                        $this->people[] = $person;
++                        $created[] = $person;
++                }
++                $this->population += count($created);
++                return $created;
++        }
++
++        public function getPeople () : array
++        {
++                return $this->people;
++        }
++
++        public function tick (float $deltaTime = 1.0) : void
++        {
++                if ($deltaTime <= 0) return;
++                $progress = $deltaTime * $this->developmentRate * 0.0001;
++                $this->improveInfrastructure($progress);
++                $this->improveTechnology($progress * 0.9);
++                $this->improveResources($progress * 0.8);
++                $this->improveStability($progress * 0.85);
++                foreach ($this->people as $person)
++                {
++                        $person->tick($deltaTime);
++                }
++        }
++
++        private function sanitizeFraction ($value) : float
++        {
++                return max(0.0, min(1.0, floatval($value)));
++        }
++
++        private function generateCitizenName () : string
++        {
++                $index = $this->population + 1;
++                return $this->name . " Citizen " . $index;
++        }
+ }
+ ?>
+diff --git a/class_galaxy.php b/class_galaxy.php
+index 5f853734451664310757a751d2354f25d7c8fe2a..7ba6f8aa54b0d944fd4e4df959449ae19c9c0549 100644
+--- a/class_galaxy.php
++++ b/class_galaxy.php
+@@ -1,196 +1,282 @@
+ <?php // 7.3.0-dev
+-class Galaxy 
++class Galaxy
+ {
+-	// properties common to all instanced galaxies:
+-	public static $numSystems;
+-	public static $numObjects;
+-	public static $objectList;
+-
+-	public $name;
+-	private $type;
+-	
+-	private $max_x;
+-	private $max_y;
+-	private $max_z;
+-	public $maxSize;
+-
+-	private $current_x;
+-	private $current_y;
+-	private $current_z;
+-	public $currentSize;
+-
+-	private $expansion_rate;
+-	private $rotation_speed;
+-	private $movement_speed;
+-	private $movement_direction;
+-	private $last_location;
+-	private $current_location;
+-
+-	private $systems;
+-	private $objects;
+-	private $empty_space;
+-	private $used_space;
+-	private $fill_rate;
+-
+-	private $age;
+-	private $ticks;
+-	private $tickEvents;
+-
+-	private $randomEventChance;
+-
+-	private $rotationStart;
+-	private $rotationTime;
+-	private $rotationTimer;
+-	private $eventTime;
+-	private $eventTimer;
+-	private $createTime;
+-	private $createTimer;
+-
+-	public static function init() : void
+-	{
+-		self::$numSystems = 0;
+-		self::$numObjects = 0;
+-		self::$objectList = array();
+-	}
+-
+-	public function __construct (string $name)
+-	{
+-		$this->initializeObject ();
+-		$this->name = Utility::cleanse_string($name);
+-		return;
+-	}
+-
+-	private function initializeObject () : void
+-	{
+-		$this->name = null;
+-		$this->type = "Galaxy";
+-		$this->max_x = floatval(0);
+-		$this->max_y = floatval (0);
+-		$this->max_z = floatval (0);
+-		$this->maxSize = floatval (0);
+-		$this->current_x = floatval (0);
+-		$this->current_y = floatval (0);
+-		$this->current_z = floatval (0);
+-		$this->currentSize = floatval (0);
+-		$this->expansion_rate = array('x' => floatval(0), 'y' => floatval(0), 'z' => floatval(0));
+-		$this->rotation_speed = floatval(0);
+-		$this->movement_speed = array('x' => floatval(0), 'y' => floatval(0), 'z' => floatval(0));
+-		$this->movement_direction = array ('x' => floatval(0), 'y' => floatval(0), 'z' => floatval(0));
+-		$this->last_location = array('x' => floatval(0), 'y' => floatval(0), 'z' => floatval(0));
+-		$this->current_location = array('x' => floatval(0), 'y' => floatval(0), 'z' => floatval(0));
+-		$this->systems = array();
+-		$this->objects = array();
+-		$this->empty_space = floatval(0);
+-		$this->used_space = floatval(0);
+-		$this->fill_rate = floatval(0);
+-		$this->age = floatval(0);
+-		$this->ticks = floatval(0);
+-		$this->tickEvents = array();
+-		$this->randomEventChance = 0;
+-		$this->rotationStart = null;
+-		$this->rotationTime = null;
+-		$this->rotationTimer = new Timer();
+-		$this->eventTime = null;
+-		$this->eventTimer = new Timer();
+-		$this->createTime = null;
+-		$this->createTimer = new Timer();
+-	}
+-
+-	public function setType (string $type) : bool
+-	{
+-		if (is_string($type)) {
+-			$this->type = strval($type);
+-			return (true);
+-		}
+-		return (false);
+-	}
+-
+-	public function setMaxX (float $x) : void
+-	{
+-		if (is_float($x)) {
+-			$this->max_x = $x;
+-		}
+-		return;
+-	}
+-
+-	public function setMaxY (float $y) : void
+-	{
+-		if (is_float($y)) {
+-			$this->max_y = $y;
+-		}
+-		return;
+-	}
+-
+-	public function setMaxZ (float $z) : void
+-	{
+-		if (is_float($z)) {
+-			$this->max_z = $z;
+-		}
+-		return;
+-	}
+-
+-	public function setExpansionRate (float $x, float $y, float $z) : void
+-	{
+-		if (is_float($x) && is_float($y) && is_float($z)) {
+-			$this->expansion_rate['x'] = $x;
+-			$this->expansion_rate['y'] = $y;
+-			$this->expansion_rate['z'] = $z;
+-		}
+-		return;
+-	}
+-
+-	public function setRotationSpeed (float $ticks) : void
+-	{
+-		if (is_float($ticks)) {
+-			$this->rotation_speed = $ticks;
+-		}
+-		return;
+-	}
+-
+-	public function setMovementSpeed (float $x, float $y, float $z) : void
+-	{
+-		$this->movement_speed['x'] = $x;
+-		$this->movement_speed['y'] = $y;
+-		$this->movement_speed['z'] = $z;
+-	}
+-
+-	// check Universe bounds ... these coordinates are in scope of "Universe"
+-	public function setLocation (float $x, float $y, float $z) : bool
+-	{
+-		$invalidX = false;
+-		$invalidY = false;
+-		$invalidZ = false;
+-		$max_x = Universe::getMaxX();
+-		$max_y = Universe::getMaxY();
+-		$max_z = Universe::getMaxZ();
+-		// does any edge of the galaxy extend beyond the Universe boundaries?
+-		if ($x > $max_x) $invalidX = true;
+-		if ($y > $max_y) $invalidY = true;
+-		if ($z > $max_z) $invalidZ = true;
+-		// does the move cause the galaxy to drift past the bounds of the Universe?
+-		if ((($this->current_x + $x) > $max_x) || (($this->current_x + $x) <= 0)) $invalidX = true;
+-		if ((($this->current_y + $y) > $max_y) || (($this->current_y + $y) <= 0)) $invalidY = true;
+-		if ((($this->current_z + $z) > $max_z) || (($this->current_z + $y) <= 0)) $invalidZ = true;
+-		if (($invalidX === true) || ($invalidY === true) || ($invalidZ === true))
+-		{
+-			if ($invalidX === true) Utility::write("Setting the location would violate the x-plane limit", LOG_INFO, L_CONSOLE);
+-			if ($invalidY === true) Utility::write("Setting the location would violate the y-plane limit", LOG_INFO, L_CONSOLE);
+-			if ($invalidZ === true) Utility::write("Setting the location would violate the z-plane limit", LOG_INFO, L_CONSOLE);
+-		  return false;
+-		}
+-		else
+-		{
+-			$this->current_x = $x;
+-			$this->current_y = $y;
+-			$this->current_z = $z;
+-			Utility::write("Successfully set the center of the Galaxy to ($x, $y, $z)", LOG_NOTICE, L_CONSOLE);
+-			return true;
+-		}
+-	}
+-
+-	public function getType () : string
+-	{
+-		return $this->type;
+-	}
++        // properties common to all instanced galaxies:
++        public static $numSystems;
++        public static $numObjects;
++        public static $objectList;
++
++        public $name;
++        private $type;
++
++        private $max_x;
++        private $max_y;
++        private $max_z;
++        public $maxSize;
++
++        private $current_x;
++        private $current_y;
++        private $current_z;
++        public $currentSize;
++
++        private $expansion_rate;
++        private $rotation_speed;
++        private $movement_speed;
++        private $movement_direction;
++        private $last_location;
++        private $current_location;
++
++        private $systems;
++        private $objects;
++        private $empty_space;
++        private $used_space;
++        private $fill_rate;
++
++        private $age;
++        private $ticks;
++        private $tickEvents;
++
++        private $randomEventChance;
++
++        private $rotationStart;
++        private $rotationTime;
++        private $rotationTimer;
++        private $eventTime;
++        private $eventTimer;
++        private $createTime;
++        private $createTimer;
++
++        public static function init() : void
++        {
++                self::$numSystems = 0;
++                self::$numObjects = 0;
++                self::$objectList = array();
++        }
++
++        public function __construct (string $name)
++        {
++                $this->initializeObject ();
++                $this->name = Utility::cleanse_string($name);
++                return;
++        }
++
++        private function initializeObject () : void
++        {
++                $this->name = null;
++                $this->type = "Galaxy";
++                $this->max_x = floatval(0);
++                $this->max_y = floatval (0);
++                $this->max_z = floatval (0);
++                $this->maxSize = floatval (0);
++                $this->current_x = floatval (0);
++                $this->current_y = floatval (0);
++                $this->current_z = floatval (0);
++                $this->currentSize = floatval (0);
++                $this->expansion_rate = array('x' => floatval(0), 'y' => floatval(0), 'z' => floatval(0));
++                $this->rotation_speed = floatval(0);
++                $this->movement_speed = array('x' => floatval(0), 'y' => floatval(0), 'z' => floatval(0));
++                $this->movement_direction = array ('x' => floatval(0), 'y' => floatval(0), 'z' => floatval(0));
++                $this->last_location = array('x' => floatval(0), 'y' => floatval(0), 'z' => floatval(0));
++                $this->current_location = array('x' => floatval(0), 'y' => floatval(0), 'z' => floatval(0));
++                $this->systems = array();
++                $this->objects = array();
++                $this->empty_space = floatval(0);
++                $this->used_space = floatval(0);
++                $this->fill_rate = floatval(0);
++                $this->age = floatval(0);
++                $this->ticks = floatval(0);
++                $this->tickEvents = array();
++                $this->randomEventChance = 0;
++                $this->rotationStart = null;
++                $this->rotationTime = null;
++                $this->rotationTimer = new Timer();
++                $this->eventTime = null;
++                $this->eventTimer = new Timer();
++                $this->createTime = null;
++                $this->createTimer = new Timer();
++        }
++
++        public function setType (string $type) : bool
++        {
++                if (is_string($type)) {
++                        $this->type = strval($type);
++                        return (true);
++                }
++                return (false);
++        }
++
++        public function setMaxX (float $x) : void
++        {
++                if (is_float($x)) {
++                        $this->max_x = $x;
++                }
++                return;
++        }
++
++        public function setMaxY (float $y) : void
++        {
++                if (is_float($y)) {
++                        $this->max_y = $y;
++                }
++                return;
++        }
++
++        public function setMaxZ (float $z) : void
++        {
++                if (is_float($z)) {
++                        $this->max_z = $z;
++                }
++                return;
++        }
++
++        public function setExpansionRate (float $x, float $y, float $z) : void
++        {
++                if (is_float($x) && is_float($y) && is_float($z)) {
++                        $this->expansion_rate['x'] = $x;
++                        $this->expansion_rate['y'] = $y;
++                        $this->expansion_rate['z'] = $z;
++                }
++                return;
++        }
++
++        public function setRotationSpeed (float $ticks) : void
++        {
++                if (is_float($ticks)) {
++                        $this->rotation_speed = $ticks;
++                }
++                return;
++        }
++
++        public function setMovementSpeed (float $x, float $y, float $z) : void
++        {
++                $this->movement_speed['x'] = $x;
++                $this->movement_speed['y'] = $y;
++                $this->movement_speed['z'] = $z;
++        }
++
++        // check Universe bounds ... these coordinates are in scope of "Universe"
++        public function setLocation (float $x, float $y, float $z) : bool
++        {
++                $invalidX = false;
++                $invalidY = false;
++                $invalidZ = false;
++                $max_x = Universe::getMaxX();
++                $max_y = Universe::getMaxY();
++                $max_z = Universe::getMaxZ();
++                // does any edge of the galaxy extend beyond the Universe boundaries?
++                if ($x > $max_x) $invalidX = true;
++                if ($y > $max_y) $invalidY = true;
++                if ($z > $max_z) $invalidZ = true;
++                // does the move cause the galaxy to drift past the bounds of the Universe?
++                if ((($this->current_x + $x) > $max_x) || (($this->current_x + $x) <= 0)) $invalidX = true;
++                if ((($this->current_y + $y) > $max_y) || (($this->current_y + $y) <= 0)) $invalidY = true;
++                if ((($this->current_z + $z) > $max_z) || (($this->current_z + $y) <= 0)) $invalidZ = true;
++                if (($invalidX === true) || ($invalidY === true) || ($invalidZ === true))
++                {
++                        if ($invalidX === true) Utility::write("Setting the location would violate the x-plane limit", LOG_INFO, L_CONSOLE);
++                        if ($invalidY === true) Utility::write("Setting the location would violate the y-plane limit", LOG_INFO, L_CONSOLE);
++                        if ($invalidZ === true) Utility::write("Setting the location would violate the z-plane limit", LOG_INFO, L_CONSOLE);
++                  return false;
++                }
++                else
++                {
++                        $this->current_x = $x;
++                        $this->current_y = $y;
++                        $this->current_z = $z;
++                        Utility::write("Successfully set the center of the Galaxy to ($x, $y, $z)", LOG_NOTICE, L_CONSOLE);
++                        return true;
++                }
++        }
++
++        public function getType () : string
++        {
++                return $this->type;
++        }
++
++        public function addSystem (System $system) : void
++        {
++                $name = $system->getName();
++                $this->systems[$name] = $system;
++                self::$numSystems = count($this->systems);
++        }
++
++        public function createSystem (string $name, Star $primaryStar, array $planets = array()) : System
++        {
++                $system = new System($name, $primaryStar);
++                $this->addSystem($system);
++                foreach ($planets as $planetSpec)
++                {
++                        if (empty($planetSpec['name'])) continue;
++                        $planet = new Planet(
++                                $planetSpec['name'],
++                                floatval($planetSpec['mass'] ?? 0.0),
++                                floatval($planetSpec['radius'] ?? 0.0),
++                                $planetSpec['position'] ?? null,
++                                $planetSpec['velocity'] ?? null
++                        );
++                        if (isset($planetSpec['environment']) && is_array($planetSpec['environment']))
++                        {
++                                $planet->setEnvironment($planetSpec['environment']);
++                        }
++                        if (isset($planetSpec['habitable']))
++                        {
++                                $planet->setHabitable((bool)$planetSpec['habitable']);
++                        }
++                        if (isset($planetSpec['orbit']) && is_array($planetSpec['orbit']))
++                        {
++                                $orbit = $planetSpec['orbit'];
++                                $system->addPlanet(
++                                        $planet,
++                                        $primaryStar,
++                                        floatval($orbit['semi_major_axis'] ?? 0.0),
++                                        floatval($orbit['period'] ?? 1.0),
++                                        floatval($orbit['eccentricity'] ?? 0.0),
++                                        floatval($orbit['phase'] ?? 0.0)
++                                );
++                        }
++                        else
++                        {
++                                $system->addObject($planet);
++                        }
++                        if (!empty($planetSpec['countries']) && is_array($planetSpec['countries']))
++                        {
++                                foreach ($planetSpec['countries'] as $countrySpec)
++                                {
++                                        if (empty($countrySpec['name'])) continue;
++                                        $country = $planet->createCountry($countrySpec['name'], $countrySpec['profile'] ?? array());
++                                        if (($country instanceof Country) && isset($countrySpec['spawn_people']))
++                                        {
++                                                $spawn = intval($countrySpec['spawn_people']);
++                                                if ($spawn > 0)
++                                                {
++                                                        $country->spawnPeople($spawn);
++                                                }
++                                        }
++                                }
++                        }
++                }
++                return $system;
++        }
++
++        public function getSystems () : array
++        {
++                return $this->systems;
++        }
++
++        public function getSystem (string $name) : ?System
++        {
++                $clean = Utility::cleanse_string($name);
++                if (!isset($this->systems[$clean])) return null;
++                return $this->systems[$clean];
++        }
++
++        public function tick (float $deltaTime = 1.0) : void
++        {
++                foreach ($this->systems as $system)
++                {
++                        $system->tick($deltaTime);
++                }
++                $this->age += max(0.0, $deltaTime);
++        }
+ }
+ ?>
+diff --git a/class_life.php b/class_life.php
+index 69eb52c9f7e05d6fdd7aeac592a6a3e9bf52ca4e..0b2636143db6f3e78c6040e95e8cd238d34dd580 100644
+--- a/class_life.php
++++ b/class_life.php
+@@ -1,6 +1,76 @@
+ <?php // 7.3.0-dev
+ class Life
+ {
++        protected $name;
++        protected $age;
++        protected $health;
++        protected $traits;
+ 
++        public function __construct (string $name, array $traits = array())
++        {
++                $this->name = Utility::cleanse_string($name);
++                $this->age = floatval(0);
++                $this->health = floatval(1.0);
++                $this->traits = array();
++                foreach ($traits as $key => $value)
++                {
++                        $this->setTrait($key, $value);
++                }
++        }
++
++        public function getName () : string
++        {
++                return $this->name;
++        }
++
++        public function getAge () : float
++        {
++                return $this->age;
++        }
++
++        public function getHealth () : float
++        {
++                return $this->health;
++        }
++
++        public function setHealth (float $health) : void
++        {
++                $this->health = max(0.0, min(1.0, floatval($health)));
++        }
++
++        public function modifyHealth (float $delta) : void
++        {
++                $this->setHealth($this->health + $delta);
++        }
++
++        public function tick (float $deltaTime = 1.0) : void
++        {
++                if ($deltaTime <= 0) return;
++                $this->age += $deltaTime;
++        }
++
++        public function isAlive () : bool
++        {
++                return ($this->health > 0.0);
++        }
++
++        public function getTraits () : array
++        {
++                return $this->traits;
++        }
++
++        public function getTrait (string $name)
++        {
++                $key = Utility::cleanse_string($name);
++                if (!array_key_exists($key, $this->traits)) return null;
++                return $this->traits[$key];
++        }
++
++        public function setTrait (string $name, $value) : void
++        {
++                if ($name === '') return;
++                $key = Utility::cleanse_string($name);
++                $this->traits[$key] = $value;
++        }
+ }
+ ?>
+diff --git a/class_person.php b/class_person.php
+index 5908e7aa2f2b8960e94a03291f543aef651034bd..f2e9e3d86d84d8a47ba0bd2262a25ad969a7c5de 100644
+--- a/class_person.php
++++ b/class_person.php
+@@ -1,6 +1,74 @@
+ <?php // 7.3.0-dev
+ class Person extends Life
+ {
++        private $homeCountry;
++        private $skills;
++        private $profession;
+ 
++        public function __construct (string $name, ?Country $homeCountry = null, array $traits = array())
++        {
++                parent::__construct($name, $traits);
++                $this->homeCountry = null;
++                $this->skills = array();
++                $this->profession = null;
++                if ($homeCountry instanceof Country)
++                {
++                        $this->setHomeCountry($homeCountry);
++                }
++        }
++
++        public function setHomeCountry (?Country $country) : void
++        {
++                $this->homeCountry = $country;
++        }
++
++        public function getHomeCountry () : ?Country
++        {
++                return $this->homeCountry;
++        }
++
++        public function setProfession (?string $profession) : void
++        {
++                if ($profession === null)
++                {
++                        $this->profession = null;
++                        return;
++                }
++                $this->profession = Utility::cleanse_string($profession);
++        }
++
++        public function getProfession () : ?string
++        {
++                return $this->profession;
++        }
++
++        public function addSkill (string $name, float $level = 0.0) : void
++        {
++                if ($name === '') return;
++                $key = Utility::cleanse_string($name);
++                $this->skills[$key] = max(0.0, min(1.0, floatval($level)));
++        }
++
++        public function getSkill (string $name) : ?float
++        {
++                $key = Utility::cleanse_string($name);
++                if (!array_key_exists($key, $this->skills)) return null;
++                return $this->skills[$key];
++        }
++
++        public function getSkills () : array
++        {
++                return $this->skills;
++        }
++
++        public function tick (float $deltaTime = 1.0) : void
++        {
++                parent::tick($deltaTime);
++                if (!$this->isAlive())
++                {
++                        $this->skills = array();
++                        $this->profession = null;
++                }
++        }
+ }
+ ?>
+diff --git a/class_planet.php b/class_planet.php
+index db587c39e932271e2b76c7472aba4a9174fcd19a..da0fb3c5d7a189f7767f585054bc761046d8a83b 100644
+--- a/class_planet.php
++++ b/class_planet.php
+@@ -1,6 +1,249 @@
+ <?php // 7.3.0-dev
++
+ class Planet extends SystemObject
+ {
++        private $atmosphere;
++        private $habitable;
++        private $orbit;
++        private $environment;
++        private $countries;
++        private $habitabilityScore;
++
++        public function __construct (string $name, float $mass = 0.0, float $radius = 0.0, ?array $position = null, ?array $velocity = null)
++        {
++                parent::__construct($name, $mass, $radius, $position, $velocity);
++                $this->setType('Planet');
++                $this->atmosphere = array();
++                $this->habitable = false;
++                $this->orbit = null;
++                $this->environment = array(
++                        'temperature' => 0.0,
++                        'water' => 0.0,
++                        'atmosphere' => 0.0,
++                        'magnetosphere' => 0.0,
++                        'biosignatures' => 0.0
++                );
++                $this->countries = array();
++                $this->habitabilityScore = 0.0;
++        }
++
++        public function setAtmosphere (array $composition) : void
++        {
++                $this->atmosphere = $composition;
++        }
++
++        public function getAtmosphere () : array
++        {
++                return $this->atmosphere;
++        }
++
++        public function setHabitable (bool $habitable) : void
++        {
++                $this->habitable = $habitable;
++        }
++
++        public function isHabitable () : bool
++        {
++                return $this->habitable;
++        }
++
++        public function setEnvironment (array $environment) : void
++        {
++                foreach ($this->environment as $key => $value)
++                {
++                        if (!array_key_exists($key, $environment)) continue;
++                        $incoming = $environment[$key];
++                        if (in_array($key, array('temperature'), true))
++                        {
++                                $this->environment[$key] = floatval($incoming);
++                                continue;
++                        }
++                        $this->environment[$key] = $this->normalizeFraction($incoming);
++                }
++                $this->updateHabitabilityScore();
++        }
++
++        public function getEnvironment () : array
++        {
++                return $this->environment;
++        }
++
++        public function getHabitabilityScore () : float
++        {
++                return $this->habitabilityScore;
++        }
++
++        public function isReadyForCivilization () : bool
++        {
++                return ($this->habitable && ($this->habitabilityScore >= 0.6));
++        }
++
++        public function registerCountry (Country $country) : void
++        {
++                $name = $country->getName();
++                $this->countries[$name] = $country;
++        }
++
++        public function createCountry (string $name, array $profile = array()) : ?Country
++        {
++                if (!$this->isReadyForCivilization())
++                {
++                        Utility::write(
++                                $this->getName() . " lacks the environmental stability for countries",
++                                LOG_INFO,
++                                L_CONSOLE
++                        );
++                        return null;
++                }
++                $cleanName = Utility::cleanse_string($name);
++                if (isset($this->countries[$cleanName]))
++                {
++                        Utility::write("Country $cleanName already exists on " . $this->getName(), LOG_WARNING, L_CONSOLE);
++                        return $this->countries[$cleanName];
++                }
++                $country = new Country($cleanName, $this, $profile);
++                return $country;
++        }
++
++        public function getCountries () : array
++        {
++                return $this->countries;
++        }
++
++        public function getCountry (string $name) : ?Country
++        {
++                $cleanName = Utility::cleanse_string($name);
++                if (!isset($this->countries[$cleanName])) return null;
++                return $this->countries[$cleanName];
++        }
++
++        public function getPopulationSummary () : array
++        {
++                $population = 0;
++                foreach ($this->countries as $country)
++                {
++                        $population += $country->getPopulation();
++                }
++                return array(
++                        'population' => $population,
++                        'countries' => count($this->countries),
++                        'habitability' => $this->habitabilityScore
++                );
++        }
++
++        public function getOrbit () : ?array
++        {
++                return $this->orbit;
++        }
++
++        public function setOrbit (SystemObject $focus, float $semiMajorAxis, float $period, float $eccentricity = 0.0, float $phase = 0.0) : bool
++        {
++                if ($semiMajorAxis <= 0)
++                {
++                        Utility::write("Semi-major axis must be positive", LOG_WARNING, L_CONSOLE);
++                        return false;
++                }
++                if ($period <= 0)
++                {
++                        Utility::write("Orbital period must be positive", LOG_WARNING, L_CONSOLE);
++                        return false;
++                }
++                if ($eccentricity < 0) $eccentricity = 0.0;
++                if ($eccentricity >= 1) $eccentricity = 0.999999;
++                $this->orbit = array(
++                        'focus' => $focus,
++                        'semi_major_axis' => floatval($semiMajorAxis),
++                        'period' => floatval($period),
++                        'eccentricity' => floatval($eccentricity),
++                        'angle' => floatval($phase)
++                );
++                $this->updateOrbit(0.0);
++                return true;
++        }
++
++        public function tick (float $deltaTime = 1.0) : void
++        {
++                $useAnalyticOrbit = ($this->orbit !== null) && ($deltaTime > 0);
++                if ($useAnalyticOrbit)
++                {
++                        $system = $this->getParentSystem();
++                        if ($system instanceof System)
++                        {
++                                $useAnalyticOrbit = ($system->getPropagationMode() === System::PROPAGATION_ANALYTIC);
++                        }
++                }
++                if ($useAnalyticOrbit)
++                {
++                        $this->updateOrbit($deltaTime);
++                        $this->age += $deltaTime;
++                }
++                else
++                {
++                        parent::tick($deltaTime);
++                }
++                foreach ($this->countries as $country)
++                {
++                        $country->tick($deltaTime);
++                }
++        }
++
++        private function normalizeFraction ($value) : float
++        {
++                return max(0.0, min(1.0, floatval($value)));
++        }
++
++        private function updateHabitabilityScore () : void
++        {
++                $temperatureScore = 0.0;
++                $temperature = $this->environment['temperature'];
++                if ($temperature >= -50 && $temperature <= 70)
++                {
++                        $temperatureScore = 1.0 - (abs($temperature - 15) / 85);
++                        $temperatureScore = max(0.0, min(1.0, $temperatureScore));
++                }
++                $scores = array(
++                        $temperatureScore,
++                        $this->environment['water'],
++                        $this->environment['atmosphere'],
++                        $this->environment['magnetosphere'],
++                        $this->environment['biosignatures']
++                );
++                $this->habitabilityScore = array_sum($scores) / count($scores);
++                if ($this->habitabilityScore >= 0.6)
++                {
++                        $this->habitable = true;
++                }
++        }
+ 
++        private function updateOrbit (float $deltaTime) : void
++        {
++                if ($this->orbit === null) return;
++                $period = $this->orbit['period'];
++                if ($period <= 0) return;
++                $twoPi = 2 * pi();
++                if ($deltaTime > 0)
++                {
++                        $this->orbit['angle'] += $twoPi * ($deltaTime / $period);
++                }
++                $this->orbit['angle'] = fmod($this->orbit['angle'], $twoPi);
++                $focus = $this->orbit['focus'];
++                $focusPosition = $focus->getPosition();
++                $focusVelocity = $focus->getVelocity();
++                $ecc = $this->orbit['eccentricity'];
++                $semi = $this->orbit['semi_major_axis'];
++                $angle = $this->orbit['angle'];
++                $radius = $semi;
++                if ($ecc > 0)
++                {
++                        $radius = ($semi * (1 - ($ecc * $ecc))) / (1 + ($ecc * cos($angle)));
++                }
++                $this->position['x'] = $focusPosition['x'] + ($radius * cos($angle));
++                $this->position['y'] = $focusPosition['y'] + ($radius * sin($angle));
++                $this->position['z'] = $focusPosition['z'];
++                $angularSpeed = $twoPi / $period;
++                $this->velocity['x'] = $focusVelocity['x'] - ($radius * $angularSpeed * sin($angle));
++                $this->velocity['y'] = $focusVelocity['y'] + ($radius * $angularSpeed * cos($angle));
++                $this->velocity['z'] = $focusVelocity['z'];
++        }
+ }
+ ?>
+diff --git a/class_star.php b/class_star.php
+index fe9e4944f7dbc25bd785b80c79b3acca2b7b2ee5..cf8bacdb2b2b913091c580030535d48abfee2900 100644
+--- a/class_star.php
++++ b/class_star.php
+@@ -1,6 +1,139 @@
+ <?php // 7.3.0-dev
+-class Star
++
++class Star extends SystemObject
+ {
++        public const SOLAR_MASS = 1.98847E30;
++        public const SOLAR_LUMINOSITY = 3.828E26;
++
++        private $luminosity;
++        private $temperature;
++        private $spectralClass;
++        private $stage;
++        private $mainSequenceLifetime;
++
++        public function __construct (string $name, float $mass = 0.0, float $radius = 0.0, float $luminosity = 0.0, float $temperature = 0.0, string $spectralClass = 'G2V', ?array $position = null, ?array $velocity = null)
++        {
++                parent::__construct($name, $mass, $radius, $position, $velocity);
++                $this->setType('Star');
++                $this->luminosity = floatval(max($luminosity, 0));
++                $this->temperature = floatval(max($temperature, 0));
++                $this->spectralClass = Utility::cleanse_string($spectralClass);
++                $this->mainSequenceLifetime = $this->estimateMainSequenceLifetime();
++                $this->stage = ($this->mainSequenceLifetime > 0) ? 'main-sequence' : 'unknown';
++        }
++
++        public function setMass (float $mass) : void
++        {
++                parent::setMass($mass);
++                $this->mainSequenceLifetime = $this->estimateMainSequenceLifetime();
++        }
++
++        public function getLuminosity () : float
++        {
++                return $this->luminosity;
++        }
++
++        public function setLuminosity (float $luminosity) : void
++        {
++                $this->luminosity = floatval(max($luminosity, 0));
++        }
++
++        public function getTemperature () : float
++        {
++                return $this->temperature;
++        }
++
++        public function setTemperature (float $temperature) : void
++        {
++                $this->temperature = floatval(max($temperature, 0));
++        }
++
++        public function getSpectralClass () : string
++        {
++                return $this->spectralClass;
++        }
++
++        public function setSpectralClass (string $spectralClass) : void
++        {
++                $this->spectralClass = Utility::cleanse_string($spectralClass);
++        }
++
++        public function getStage () : string
++        {
++                return $this->stage;
++        }
++
++        public function getMainSequenceLifetime () : float
++        {
++                return $this->mainSequenceLifetime;
++        }
++
++        public function emitEnergy (float $deltaTime = 1.0) : float
++        {
++                if ($deltaTime <= 0) return 0.0;
++                return $this->luminosity * $deltaTime;
++        }
++
++        public function getHabitableZone () : array
++        {
++                if ($this->luminosity <= 0)
++                {
++                        return array('inner' => 0.0, 'outer' => 0.0);
++                }
++                $luminosityRatio = $this->luminosity / self::SOLAR_LUMINOSITY;
++                $inner = sqrt($luminosityRatio / 1.1);
++                $outer = sqrt($luminosityRatio / 0.53);
++                return array('inner' => $inner, 'outer' => $outer);
++        }
++
++        public function tick (float $deltaTime = 1.0) : void
++        {
++                parent::tick($deltaTime);
++                if ($deltaTime > 0)
++                {
++                        $this->updateStage();
++                }
++        }
++
++        private function estimateMainSequenceLifetime () : float
++        {
++                if ($this->mass <= 0) return 0.0;
++                $massRatio = $this->mass / self::SOLAR_MASS;
++                if ($massRatio <= 0) return 0.0;
++                $years = 1.0E10 * pow($massRatio, -2.5);
++                $seconds = $years * 365.25 * 24 * 3600;
++                return $seconds;
++        }
+ 
++        private function updateStage () : void
++        {
++                $previous = $this->stage;
++                if ($this->mainSequenceLifetime <= 0)
++                {
++                        $this->stage = 'unknown';
++                        return;
++                }
++                $fraction = $this->age / $this->mainSequenceLifetime;
++                if ($fraction < 0.7)
++                {
++                        $this->stage = 'main-sequence';
++                }
++                elseif ($fraction < 1.0)
++                {
++                        $this->stage = 'subgiant';
++                }
++                else
++                {
++                        $this->stage = 'post-main-sequence';
++                }
++                if (($previous !== null) && ($previous !== $this->stage))
++                {
++                        Utility::write(
++                                $this->getName() . " transitioned to " . $this->stage . " phase",
++                                LOG_NOTICE,
++                                L_CONSOLE
++                        );
++                }
++        }
+ }
+ ?>
+diff --git a/class_system.php b/class_system.php
+index df114ecacba104f43b147a15e1b7c81fe968d71f..d79ead0d06a4fdbccf2a6e64e4b7fa79019740a3 100644
+--- a/class_system.php
++++ b/class_system.php
+@@ -1,6 +1,350 @@
+ <?php // 7.3.0-dev
+-class System extends Galaxy
++
++class System
+ {
++        public const PROPAGATION_ANALYTIC = 'analytic';
++        public const PROPAGATION_NUMERICAL = 'numerical';
++
++        private $name;
++        private $objects;
++        private $primaryStar;
++        private $age;
++        private $timeStep;
++        private $propagationMode;
++        private $gravitySofteningLength;
++
++        public function __construct (string $name, ?Star $primaryStar = null)
++        {
++                $this->name = Utility::cleanse_string($name);
++                $this->objects = array();
++                $this->primaryStar = null;
++                $this->age = floatval(0);
++                $this->timeStep = floatval(60);
++                $this->propagationMode = self::PROPAGATION_ANALYTIC;
++                $this->gravitySofteningLength = floatval(0);
++                if ($primaryStar instanceof Star)
++                {
++                        $this->setPrimaryStar($primaryStar);
++                }
++        }
++
++        public function getName () : string
++        {
++                return $this->name;
++        }
++
++        public function getAge () : float
++        {
++                return $this->age;
++        }
++
++        public function setTimeStep (float $seconds) : void
++        {
++                if ($seconds <= 0)
++                {
++                        Utility::write("Time step must be greater than zero", LOG_WARNING, L_CONSOLE);
++                        return;
++                }
++                $this->timeStep = floatval($seconds);
++        }
++
++        public function getTimeStep () : float
++        {
++                return $this->timeStep;
++        }
++
++        public function setPropagationMode (string $mode) : void
++        {
++                $mode = strtolower(trim($mode));
++                if (!in_array($mode, array(self::PROPAGATION_ANALYTIC, self::PROPAGATION_NUMERICAL), true))
++                {
++                        Utility::write("Unknown propagation mode: $mode", LOG_WARNING, L_CONSOLE);
++                        return;
++                }
++                $this->propagationMode = $mode;
++        }
++
++        public function getPropagationMode () : string
++        {
++                return $this->propagationMode;
++        }
++
++        public function setGravitySofteningLength (float $length) : void
++        {
++                $this->gravitySofteningLength = max(floatval($length), 0.0);
++        }
++
++        public function getGravitySofteningLength () : float
++        {
++                return $this->gravitySofteningLength;
++        }
++
++        public function setPrimaryStar (Star $star) : void
++        {
++                $this->primaryStar =& $star;
++                $this->registerObject($star);
++        }
++
++        public function getPrimaryStar () : ?Star
++        {
++                return $this->primaryStar;
++        }
++
++        public function addObject (SystemObject $object) : void
++        {
++                $this->registerObject($object);
++        }
++
++        public function addPlanet (Planet $planet, ?SystemObject $focus = null, ?float $semiMajorAxis = null, ?float $period = null, float $eccentricity = 0.0, float $phase = 0.0) : void
++        {
++                $this->registerObject($planet);
++                if (($focus instanceof SystemObject) && ($semiMajorAxis !== null) && ($period !== null))
++                {
++                        if ($planet->setOrbit($focus, $semiMajorAxis, $period, $eccentricity, $phase))
++                        {
++                                Utility::write(
++                                        $planet->getName() . " orbit registered around " . $focus->getName(),
++                                        LOG_INFO,
++                                        L_CONSOLE
++                                );
++                        }
++                }
++        }
++
++        private function registerObject (SystemObject $object) : void
++        {
++                $name = $object->getName();
++                if (isset($this->objects[$name]))
++                {
++                        Utility::write(
++                                "Replacing existing object $name in system " . $this->name,
++                                LOG_WARNING,
++                                L_CONSOLE
++                        );
++                }
++                $this->objects[$name] =& $object;
++                $object->attachToSystem($this);
++        }
++
++        public function removeObject (string $name) : ?SystemObject
++        {
++                if (!isset($this->objects[$name])) return null;
++                $object = $this->objects[$name];
++                unset($this->objects[$name]);
++                if ($object->getParentSystem() === $this)
++                {
++                        $object->attachToSystem(null);
++                }
++                if (($this->primaryStar !== null) && ($this->primaryStar->getName() === $name))
++                {
++                        $this->primaryStar = null;
++                }
++                return $object;
++        }
++
++        public function getObjects () : array
++        {
++                return $this->objects;
++        }
++
++        public function getObject (string $name) : ?SystemObject
++        {
++                if (!isset($this->objects[$name])) return null;
++                return $this->objects[$name];
++        }
++
++        public function getPlanets () : array
++        {
++                $planets = array();
++                foreach ($this->objects as $object)
++                {
++                        if ($object instanceof Planet)
++                        {
++                                $planets[$object->getName()] = $object;
++                        }
++                }
++                return $planets;
++        }
++
++        public function hasObject (string $name) : bool
++        {
++                return isset($this->objects[$name]);
++        }
++
++        public function countObjects () : int
++        {
++                return count($this->objects);
++        }
++
++        public function tick (?float $deltaTime = null) : void
++        {
++                $step = ($deltaTime === null) ? $this->timeStep : floatval($deltaTime);
++                if ($step <= 0) return;
++                if ($this->propagationMode === self::PROPAGATION_NUMERICAL)
++                {
++                        $this->applyGravitationalAccelerations($step);
++                }
++                foreach ($this->objects as $object)
++                {
++                        $object->tick($step);
++                }
++                $this->age += $step;
++        }
++
++        public function snapshotState () : array
++        {
++                $state = array();
++                foreach ($this->objects as $object)
++                {
++                        $state[$object->getName()] = array(
++                                'type' => $object->getType(),
++                                'mass' => $object->getMass(),
++                                'radius' => $object->getRadius(),
++                                'position' => $object->getPosition(),
++                                'velocity' => $object->getVelocity(),
++                                'age' => $object->getAge()
++                        );
++                }
++                return $state;
++        }
++
++        public function calculateCenterOfMass () : array
++        {
++                $totalMass = 0.0;
++                $center = array('x' => 0.0, 'y' => 0.0, 'z' => 0.0);
++                foreach ($this->objects as $object)
++                {
++                        $mass = $object->getMass();
++                        if ($mass <= 0) continue;
++                        $position = $object->getPosition();
++                        $center['x'] += $position['x'] * $mass;
++                        $center['y'] += $position['y'] * $mass;
++                        $center['z'] += $position['z'] * $mass;
++                        $totalMass += $mass;
++                }
++                if ($totalMass <= 0)
++                {
++                        return $center;
++                }
++                $center['x'] /= $totalMass;
++                $center['y'] /= $totalMass;
++                $center['z'] /= $totalMass;
++                return $center;
++        }
++
++        public function calculateTotalEnergy () : array
++        {
++                $kinetic = 0.0;
++                $potential = 0.0;
++                $objects = array_values($this->objects);
++                $count = count($objects);
++                for ($i = 0; $i < $count; $i++)
++                {
++                        $object = $objects[$i];
++                        $kinetic += $object->getKineticEnergy();
++                }
++                for ($i = 0; $i < $count; $i++)
++                {
++                        $a = $objects[$i];
++                        $massA = $a->getMass();
++                        if ($massA <= 0) continue;
++                        $posA = $a->getPosition();
++                        for ($j = $i + 1; $j < $count; $j++)
++                        {
++                                $b = $objects[$j];
++                                $massB = $b->getMass();
++                                if ($massB <= 0) continue;
++                                $posB = $b->getPosition();
++                                $dx = $posB['x'] - $posA['x'];
++                                $dy = $posB['y'] - $posA['y'];
++                                $dz = $posB['z'] - $posA['z'];
++                                $distanceSquared = ($dx * $dx) + ($dy * $dy) + ($dz * $dz);
++                                if ($distanceSquared <= 0) continue;
++                                $distance = sqrt($distanceSquared);
++                                if ($distance <= 0) continue;
++                                $potential -= (SystemObject::GRAVITATIONAL_CONSTANT * $massA * $massB) / $distance;
++                        }
++                }
++                return array(
++                        'kinetic' => $kinetic,
++                        'potential' => $potential,
++                        'total' => $kinetic + $potential
++                );
++        }
+ 
++        private function applyGravitationalAccelerations (float $deltaTime) : void
++        {
++                if ($deltaTime <= 0) return;
++                $names = array_keys($this->objects);
++                $count = count($names);
++                if ($count < 2) return;
++                $accelerations = array();
++                foreach ($names as $name)
++                {
++                        $accelerations[$name] = array('x' => 0.0, 'y' => 0.0, 'z' => 0.0);
++                }
++                for ($i = 0; $i < $count; $i++)
++                {
++                        $nameA = $names[$i];
++                        $objectA = $this->objects[$nameA];
++                        $massA = $objectA->getMass();
++                        for ($j = $i + 1; $j < $count; $j++)
++                        {
++                                $nameB = $names[$j];
++                                $objectB = $this->objects[$nameB];
++                                $massB = $objectB->getMass();
++                                if (($massA <= 0) && ($massB <= 0))
++                                {
++                                        continue;
++                                }
++                                $posA = $objectA->getPosition();
++                                $posB = $objectB->getPosition();
++                                $dx = $posB['x'] - $posA['x'];
++                                $dy = $posB['y'] - $posA['y'];
++                                $dz = $posB['z'] - $posA['z'];
++                                $distanceSquared = ($dx * $dx) + ($dy * $dy) + ($dz * $dz);
++                                $softening = $this->gravitySofteningLength;
++                                if ($softening > 0)
++                                {
++                                        $distanceSquared += $softening * $softening;
++                                }
++                                if ($distanceSquared <= 0)
++                                {
++                                        continue;
++                                }
++                                $distance = sqrt($distanceSquared);
++                                if ($distance <= 0)
++                                {
++                                        continue;
++                                }
++                                $ux = $dx / $distance;
++                                $uy = $dy / $distance;
++                                $uz = $dz / $distance;
++                                if ($massA > 0)
++                                {
++                                        $accMagA = SystemObject::GRAVITATIONAL_CONSTANT * $massB / $distanceSquared;
++                                        $accelerations[$nameA]['x'] += $ux * $accMagA;
++                                        $accelerations[$nameA]['y'] += $uy * $accMagA;
++                                        $accelerations[$nameA]['z'] += $uz * $accMagA;
++                                }
++                                if ($massB > 0)
++                                {
++                                        $accMagB = SystemObject::GRAVITATIONAL_CONSTANT * $massA / $distanceSquared;
++                                        $accelerations[$nameB]['x'] -= $ux * $accMagB;
++                                        $accelerations[$nameB]['y'] -= $uy * $accMagB;
++                                        $accelerations[$nameB]['z'] -= $uz * $accMagB;
++                                }
++                        }
++                }
++                foreach ($accelerations as $name => $vector)
++                {
++                        $object = $this->objects[$name];
++                        if ($object->getMass() <= 0)
++                        {
++                                continue;
++                        }
++                        $object->applyAcceleration($vector, $deltaTime);
++                }
++        }
+ }
+ ?>
+diff --git a/class_systemObject.php b/class_systemObject.php
+index fdc12d62ae21a4c2539f33d5d0d9c1092c883f62..ad7f01bf1c349fadde11aa7331a4e9d72a19cdcd 100644
+--- a/class_systemObject.php
++++ b/class_systemObject.php
+@@ -1,6 +1,221 @@
+ <?php // 7.3.0-dev
++
+ class SystemObject
+ {
++        public const GRAVITATIONAL_CONSTANT = 6.67430E-11;
++
++        protected $name;
++        protected $type;
++        protected $mass;
++        protected $radius;
++        protected $position;
++        protected $velocity;
++        protected $metadata;
++        protected $parentSystem;
++        protected $age;
++
++        public function __construct (string $name, float $mass = 0.0, float $radius = 0.0, ?array $position = null, ?array $velocity = null)
++        {
++                $this->name = Utility::cleanse_string($name);
++                $this->type = get_class($this);
++                $this->mass = floatval($mass);
++                $this->radius = floatval($radius);
++                $this->position = $this->sanitizeVector($position);
++                $this->velocity = $this->sanitizeVector($velocity);
++                $this->metadata = array();
++                $this->parentSystem = null;
++                $this->age = floatval(0);
++        }
++
++        protected function sanitizeVector (?array $vector) : array
++        {
++                $defaults = array('x' => floatval(0), 'y' => floatval(0), 'z' => floatval(0));
++                if ($vector === null) return $defaults;
++                foreach ($defaults as $axis => $value)
++                {
++                        if (isset($vector[$axis]))
++                        {
++                                $defaults[$axis] = floatval($vector[$axis]);
++                        }
++                }
++                return $defaults;
++        }
++
++        public function getName () : string
++        {
++                return $this->name;
++        }
++
++        public function getType () : string
++        {
++                return $this->type;
++        }
++
++        public function setType (string $type) : void
++        {
++                if (!empty($type))
++                {
++                        $this->type = Utility::cleanse_string($type);
++                }
++        }
++
++        public function getMass () : float
++        {
++                return $this->mass;
++        }
++
++        public function setMass (float $mass) : void
++        {
++                $this->mass = floatval(max($mass, 0));
++        }
++
++        public function getRadius () : float
++        {
++                return $this->radius;
++        }
++
++        public function setRadius (float $radius) : void
++        {
++                $this->radius = floatval(max($radius, 0));
++        }
++
++        public function getPosition () : array
++        {
++                return $this->position;
++        }
++
++        public function setPosition (array $position) : void
++        {
++                $this->position = $this->sanitizeVector($position);
++        }
++
++        public function translate (array $offset) : void
++        {
++                $offset = $this->sanitizeVector($offset);
++                foreach ($this->position as $axis => $value)
++                {
++                        $this->position[$axis] += $offset[$axis];
++                }
++        }
++
++        public function getVelocity () : array
++        {
++                return $this->velocity;
++        }
++
++        public function setVelocity (array $velocity) : void
++        {
++                $this->velocity = $this->sanitizeVector($velocity);
++        }
++
++        public function getSpeed () : float
++        {
++                return sqrt(
++                        pow($this->velocity['x'], 2) +
++                        pow($this->velocity['y'], 2) +
++                        pow($this->velocity['z'], 2)
++                );
++        }
++
++        public function getMomentumVector () : array
++        {
++                return array(
++                        'x' => $this->mass * $this->velocity['x'],
++                        'y' => $this->mass * $this->velocity['y'],
++                        'z' => $this->mass * $this->velocity['z']
++                );
++        }
++
++        public function getKineticEnergy () : float
++        {
++                if ($this->mass <= 0) return 0.0;
++                $speed = $this->getSpeed();
++                return 0.5 * $this->mass * $speed * $speed;
++        }
++
++        public function applyAcceleration (array $acceleration, float $deltaTime) : void
++        {
++                if ($deltaTime <= 0) return;
++                $acceleration = $this->sanitizeVector($acceleration);
++                foreach ($this->velocity as $axis => $value)
++                {
++                        $this->velocity[$axis] += $acceleration[$axis] * $deltaTime;
++                }
++        }
++
++        public function tick (float $deltaTime = 1.0) : void
++        {
++                if ($deltaTime <= 0) return;
++                foreach ($this->position as $axis => $value)
++                {
++                        $this->position[$axis] += $this->velocity[$axis] * $deltaTime;
++                }
++                $this->age += $deltaTime;
++        }
++
++        public function getAge () : float
++        {
++                return $this->age;
++        }
++
++        public function resetAge () : void
++        {
++                $this->age = floatval(0);
++        }
++
++        public function attachToSystem (?System $system) : void
++        {
++                $this->parentSystem = $system;
++                if ($system !== null)
++                {
++                        Utility::write(
++                                $this->name . " now belongs to system " . $system->getName(),
++                                LOG_INFO,
++                                L_CONSOLE
++                        );
++                }
++        }
++
++        public function getParentSystem () : ?System
++        {
++                return $this->parentSystem;
++        }
++
++        public function isBoundToSystem () : bool
++        {
++                return ($this->parentSystem instanceof System);
++        }
++
++        public function distanceTo (SystemObject $object) : float
++        {
++                $other = $object->getPosition();
++                $dx = $this->position['x'] - $other['x'];
++                $dy = $this->position['y'] - $other['y'];
++                $dz = $this->position['z'] - $other['z'];
++                return sqrt(($dx * $dx) + ($dy * $dy) + ($dz * $dz));
++        }
++
++        public function getGravitationalParameter () : float
++        {
++                return self::GRAVITATIONAL_CONSTANT * $this->mass;
++        }
++
++        public function setMetadata (string $key, $value) : void
++        {
++                if ($key === '') return;
++                $this->metadata[$key] = $value;
++        }
++
++        public function getMetadata (?string $key = null)
++        {
++                if ($key === null) return $this->metadata;
++                if (!array_key_exists($key, $this->metadata)) return null;
++                return $this->metadata[$key];
++        }
+ 
++        public function __toString () : string
++        {
++                return $this->type . ' ' . $this->name;
++        }
+ }
+ ?>
+diff --git a/class_universe.php b/class_universe.php
+index f9a087deebe5ca613523caaa5cecf412c8ca8719..5f3cd01f1a9f7715dfcd84ed41e9f7a41f41d060 100644
+--- a/class_universe.php
++++ b/class_universe.php
+@@ -590,90 +590,130 @@ class Universe
+ 	{
+ 		$this->empty_space['x'] = self::$max_x - self::$current_x;
+ 		return $this->empty_space['x'];
+ 	}
+ 
+ 	public function getFreeY () : float
+ 	{
+ 		$this->empty_space['y'] = self::$max_y - self::$current_x;
+ 		return $this->empty_space['y'];
+ 	}
+ 
+ 	public function getFreeZ () : float
+ 	{
+ 		$this->empty_space['z'] = self::$max_z - self::$current_z;
+ 		return $this->empty_space['z'];
+ 	}
+ 
+ 	public function getFreeSpace () : array
+ 	{
+ 		$this->getFreeX();
+ 		$this->getFreeY();
+ 		$this->getFreeZ();
+ 		return $this->empty_space;
+ 	}
+ 
+-	public function createGalaxy (string $name, float $x = null, float $y = null, float $z = null) : bool
+-	{
+-		// set upper bounds of galaxy's x-plane (if it doesn't exceed boundaries)
+-		if ($x === null)
+-		{
+-			$x = floatval(random_int(1,$this->empty_space['x']));
+-		}
+-		if ($y === null)
+-		{
+-			$y = floatval(random_int(1,$this->empty_space['y']));
+-		}
+-		if ($z === null)
+-		{
+-			$z = floatval(random_int(1,$this->empty_space['z']));
+-		}
+-		foreach ($this->galaxies as $galaxy)
+-		{
+-			if (!is_a($galaxy,"Galaxy")) continue;
+-			if ($galaxy->name === $name)
+-			{
+-				Utility::write ("Galaxy $name already exists, aborting", LOG_WARNING, L_CONSOLE);
+-				return false;
+-			}	
+-		}
+-		// set the name
+-		$this->galaxies[$name] = new Galaxy($name);
+-		// add to the static object list
+-		self::$objectList[] =& $this->galaxies[$name];
+-		// increment the galaxy count
+-		self::$numGalaxies++;
+-		// adjust the space-trackers
+-		$this->galaxies[$name]->setMaxX ($x);
+-		self::$current_x += $x;
+-		$this->empty_space['x'] -= $x;
+-		$this->galaxies[$name]->setMaxY ($y);
+-		self::$current_y += $y;
+-		$this->empty_space['y'] -= $y;
+-		$this->galaxies[$name]->setMaxZ ($z);
+-		self::$current_z += $z;
+-		$this->empty_space['z'] -= $z;
+-		return true;
+-	}
+-
+-	public function galaxyList () : void
++	
++        public function registerGalaxy (Galaxy $galaxy) : void
++        {
++                $name = $galaxy->name;
++                $this->galaxies[$name] =& $galaxy;
++                $found = false;
++                foreach (self::$objectList as $index => $object)
++                {
++                        if (($object instanceof Galaxy) && ($object->name === $name))
++                        {
++                                self::$objectList[$index] =& $this->galaxies[$name];
++                                $found = true;
++                                break;
++                        }
++                }
++                if ($found === false)
++                {
++                        self::$objectList[] =& $this->galaxies[$name];
++                }
++                self::$numGalaxies = count($this->galaxies);
++        }
++
++        public function getGalaxies () : array
++        {
++                return $this->galaxies;
++        }
++
++        public function getGalaxy (string $name) : ?Galaxy
++        {
++                $cleanName = Utility::cleanse_string($name);
++                if (!isset($this->galaxies[$cleanName])) return null;
++                return $this->galaxies[$cleanName];
++        }
++
++        public function advance (float $deltaTime = 1.0) : void
++        {
++                $this->tick();
++                foreach ($this->galaxies as $galaxy)
++                {
++                        if ($galaxy instanceof Galaxy)
++                        {
++                                $galaxy->tick($deltaTime);
++                        }
++                }
++        }
++
++        public function createGalaxy (string $name, float $x = null, float $y = null, float $z = null) : bool
++        {
++                if ($x === null)
++                {
++                        $x = floatval(random_int(1, $this->empty_space['x']));
++                }
++                if ($y === null)
++                {
++                        $y = floatval(random_int(1, $this->empty_space['y']));
++                }
++                if ($z === null)
++                {
++                        $z = floatval(random_int(1, $this->empty_space['z']));
++                }
++                foreach ($this->galaxies as $galaxy)
++                {
++                        if (!is_a($galaxy, 'Galaxy')) continue;
++                        if ($galaxy->name === $name)
++                        {
++                                Utility::write("Galaxy $name already exists, aborting", LOG_WARNING, L_CONSOLE);
++                                return false;
++                        }
++                }
++                $galaxy = new Galaxy($name);
++                $this->registerGalaxy($galaxy);
++                $galaxy->setMaxX($x);
++                self::$current_x += $x;
++                $this->empty_space['x'] -= $x;
++                $galaxy->setMaxY($y);
++                self::$current_y += $y;
++                $this->empty_space['y'] -= $y;
++                $galaxy->setMaxZ($z);
++                self::$current_z += $z;
++                $this->empty_space['z'] -= $z;
++                return true;
++        }
++
++        public function galaxyList () : void
+ 	{
+ 		foreach ($this->galaxies as $idx => $galaxy) {
+ 			if (empty($galaxy)) continue;
+ 			echo "Galaxy: " . $galaxy->name . PHP_EOL;
+ 		}
+ 	}
+ 
+ 	public function objectList () : void
+ 	{
+ 		foreach (self::$objectList as $idx => $object) {
+ 			if (empty($object) || !(is_object($object))) continue;
+ 			echo "Object: " . $object->name . PHP_EOL;
+ 		}
+ 	}
+ 
+ 	public function dump () : void
+ 	{
+ 		var_dump (get_class_vars("Universe"));
+ 	}
+ }
+ ?>
+diff --git a/class_universeDaemon.php b/class_universeDaemon.php
+new file mode 100644
+index 0000000000000000000000000000000000000000..6d00181a8fbe9037de0f526e3347b3bfb9252dc1
+--- /dev/null
++++ b/class_universeDaemon.php
+@@ -0,0 +1,414 @@
++<?php // 7.3.0-dev
++
++class UniverseDaemon
++{
++        private $simulator;
++        private $socketPath;
++        private $pidFile;
++        private $deltaTime;
++        private $loopInterval;
++        private $autoSteps;
++        private $server;
++        private $clients;
++        private $running;
++        private $lastSnapshot;
++        private $startedAt;
++        private $forkedPid;
++
++        public function __construct (UniverseSimulator $simulator, array $options = array())
++        {
++                $this->simulator = $simulator;
++                $this->socketPath = $options['socket'] ?? (__DIR__ . '/runtime/universe.sock');
++                $this->pidFile = $options['pid_file'] ?? (__DIR__ . '/runtime/universe.pid');
++                $this->deltaTime = floatval($options['delta_time'] ?? 3600.0);
++                $this->loopInterval = max(0.1, floatval($options['loop_interval'] ?? 1.0));
++                $this->autoSteps = max(1, intval($options['auto_steps'] ?? 1));
++                $this->clients = array();
++                $this->running = false;
++                $this->server = null;
++                $this->lastSnapshot = null;
++                $this->startedAt = microtime(true);
++                $this->forkedPid = null;
++        }
++
++        public function daemonize () : bool
++        {
++                if (!function_exists('pcntl_fork'))
++                {
++                        Utility::write('pcntl_fork is not available, continuing in foreground mode', LOG_WARNING, L_CONSOLE);
++                        return false;
++                }
++
++                $pid = pcntl_fork();
++                if ($pid === -1)
++                {
++                        Utility::write('Unable to fork the universe daemon', LOG_ERROR, L_ERROR);
++                        return false;
++                }
++
++                if ($pid > 0)
++                {
++                        $this->forkedPid = $pid;
++                        return true;
++                }
++
++                if (function_exists('posix_setsid'))
++                {
++                        posix_setsid();
++                }
++
++                fclose(STDIN);
++                fclose(STDOUT);
++                fclose(STDERR);
++                fopen('/dev/null', 'r');
++                fopen('/dev/null', 'a');
++                fopen('/dev/null', 'a');
++                return false;
++        }
++
++        public function getForkedPid () : ?int
++        {
++                return $this->forkedPid;
++        }
++
++        public function run () : void
++        {
++                $this->prepareRuntime();
++                $this->running = true;
++                $this->startedAt = microtime(true);
++                $this->installSignalHandlers();
++
++                $nextStep = microtime(true);
++                while ($this->running)
++                {
++                        $now = microtime(true);
++                        if ($now >= $nextStep)
++                        {
++                                $this->advanceSimulation();
++                                $nextStep = $now + $this->loopInterval;
++                        }
++
++                        $timeout = max(0.0, $nextStep - microtime(true));
++                        $this->poll($timeout);
++                }
++
++                $this->shutdown();
++        }
++
++        private function prepareRuntime () : void
++        {
++                $this->ensureDirectory(dirname($this->socketPath));
++                $this->ensureDirectory(dirname($this->pidFile));
++
++                if (file_exists($this->socketPath))
++                {
++                        @unlink($this->socketPath);
++                }
++
++                $this->server = @stream_socket_server('unix://' . $this->socketPath, $errno, $errstr);
++                if (!$this->server)
++                {
++                        throw new RuntimeException('Failed to create universe daemon socket: ' . $errstr, $errno);
++                }
++
++                stream_set_blocking($this->server, false);
++
++                if (!empty($this->pidFile))
++                {
++                        $pid = getmypid();
++                        file_put_contents($this->pidFile, $pid);
++                }
++        }
++
++        private function ensureDirectory (string $path) : void
++        {
++                if ($path === '' || $path === '.' || file_exists($path))
++                {
++                        return;
++                }
++                if (!@mkdir($path, 0777, true) && !is_dir($path))
++                {
++                        throw new RuntimeException('Unable to create directory ' . $path);
++                }
++        }
++
++        private function installSignalHandlers () : void
++        {
++                if (!function_exists('pcntl_signal'))
++                {
++                        return;
++                }
++
++                pcntl_async_signals(true);
++                pcntl_signal(SIGTERM, array($this, 'handleSignal'));
++                pcntl_signal(SIGINT, array($this, 'handleSignal'));
++        }
++
++        public function handleSignal (int $signal) : void
++        {
++                switch ($signal)
++                {
++                        case SIGINT:
++                        case SIGTERM:
++                                $this->running = false;
++                                break;
++                }
++        }
++
++        private function advanceSimulation () : void
++        {
++                try
++                {
++                        for ($i = 0; $i < $this->autoSteps; $i++)
++                        {
++                                $this->lastSnapshot = $this->simulator->step($this->deltaTime);
++                        }
++                }
++                catch (Throwable $error)
++                {
++                        Utility::write('Universe simulation step failed: ' . $error->getMessage(), LOG_ERROR, L_ERROR);
++                }
++        }
++
++        private function poll (float $timeoutSeconds) : void
++        {
++                $read = array();
++                if ($this->server)
++                {
++                        $read[] = $this->server;
++                }
++
++                foreach ($this->clients as $client)
++                {
++                        $read[] = $client;
++                }
++
++                if (empty($read))
++                {
++                        usleep((int) ($timeoutSeconds * 1000000));
++                        return;
++                }
++
++                $sec = (int) $timeoutSeconds;
++                $usec = (int) (($timeoutSeconds - $sec) * 1000000);
++
++                $write = null;
++                $except = null;
++                $available = @stream_select($read, $write, $except, $sec, $usec);
++                if ($available === false || $available === 0)
++                {
++                        return;
++                }
++
++                foreach ($read as $stream)
++                {
++                        if ($stream === $this->server)
++                        {
++                                $this->acceptClient();
++                                continue;
++                        }
++
++                        $this->serviceClient($stream);
++                }
++        }
++
++        private function acceptClient () : void
++        {
++                $client = @stream_socket_accept($this->server, 0);
++                if (!$client)
++                {
++                        return;
++                }
++
++                stream_set_blocking($client, false);
++                $this->clients[(int) $client] = $client;
++        }
++
++        private function serviceClient ($stream) : void
++        {
++                $data = @fgets($stream);
++                if ($data === false)
++                {
++                        $this->dropClient($stream);
++                        return;
++                }
++
++                $data = trim($data);
++                if ($data === '')
++                {
++                        return;
++                }
++
++                $payload = json_decode($data, true);
++                if (!is_array($payload) || empty($payload['command']))
++                {
++                        $this->respond($stream, array(
++                                'ok' => false,
++                                'error' => 'Invalid command payload'
++                        ));
++                        return;
++                }
++
++                $command = strtolower(strval($payload['command']));
++                $args = $payload['args'] ?? array();
++                $response = $this->executeCommand($command, $args);
++                $this->respond($stream, $response);
++
++                if (!$response['keep_alive'])
++                {
++                        $this->dropClient($stream);
++                }
++        }
++
++        private function executeCommand (string $command, array $args) : array
++        {
++                switch ($command)
++                {
++                        case 'ping':
++                                return $this->wrapResponse(true, array('message' => 'pong'));
++
++                        case 'help':
++                                return $this->wrapResponse(true, array(
++                                        'commands' => array(
++                                                'ping' => 'Check daemon responsiveness',
++                                                'status' => 'Summarize current universe statistics',
++                                                'snapshot' => 'Return the latest cached snapshot of the universe',
++                                                'advance' => 'Advance the simulation immediately (accepts steps, delta_time)',
++                                                'shutdown' => 'Stop the universe daemon gracefully'
++                                        )
++                                ));
++
++                        case 'status':
++                                return $this->wrapResponse(true, $this->gatherStatus());
++
++                        case 'snapshot':
++                                return $this->wrapResponse(true, array(
++                                        'snapshot' => $this->lastSnapshot ?? $this->simulator->snapshot()
++                                ));
++
++                        case 'advance':
++                                $steps = max(1, intval($args['steps'] ?? 1));
++                                $delta = isset($args['delta_time']) ? floatval($args['delta_time']) : $this->deltaTime;
++                                $snapshot = null;
++                                for ($i = 0; $i < $steps; $i++)
++                                {
++                                        $snapshot = $this->simulator->step($delta);
++                                }
++                                $this->lastSnapshot = $snapshot;
++                                return $this->wrapResponse(true, array(
++                                        'snapshot' => $snapshot,
++                                        'steps' => $steps,
++                                        'delta_time' => $delta
++                                ));
++
++                        case 'shutdown':
++                                $this->running = false;
++                                return $this->wrapResponse(true, array(
++                                        'message' => 'Universe daemon is shutting down'
++                                ), false);
++
++                        default:
++                                return $this->wrapResponse(false, array(
++                                        'error' => "Unknown command '{$command}'"
++                                ));
++                }
++        }
++
++        private function wrapResponse (bool $ok, array $data, bool $keepAlive = true) : array
++        {
++                $payload = array_merge(array('ok' => $ok), $data);
++                $payload['keep_alive'] = $keepAlive;
++                return $payload;
++        }
++
++        private function respond ($stream, array $payload) : void
++        {
++                $encoded = json_encode($payload) . PHP_EOL;
++                @fwrite($stream, $encoded);
++        }
++
++        private function dropClient ($stream) : void
++        {
++                $id = (int) $stream;
++                if (isset($this->clients[$id]))
++                {
++                        unset($this->clients[$id]);
++                }
++                @fclose($stream);
++        }
++
++        private function gatherStatus () : array
++        {
++                $universe = $this->simulator->getUniverse();
++                $galaxies = $universe->getGalaxies();
++                $systemCount = 0;
++                $planetCount = 0;
++                $population = 0;
++
++                foreach ($galaxies as $galaxy)
++                {
++                        if (!($galaxy instanceof Galaxy))
++                        {
++                                continue;
++                        }
++                        foreach ($galaxy->getSystems() as $system)
++                        {
++                                if (!($system instanceof System))
++                                {
++                                        continue;
++                                }
++                                $systemCount++;
++                                foreach ($system->getPlanets() as $planet)
++                                {
++                                        if (!($planet instanceof Planet))
++                                        {
++                                                continue;
++                                        }
++                                        $planetCount++;
++                                        $summary = $planet->getPopulationSummary();
++                                        $population += intval($summary['population'] ?? 0);
++                                }
++                        }
++                }
++
++                return array(
++                        'tick' => $universe->getTicks(),
++                        'galaxies' => count($galaxies),
++                        'systems' => $systemCount,
++                        'planets' => $planetCount,
++                        'population' => $population,
++                        'uptime' => microtime(true) - $this->startedAt,
++                        'auto_steps' => $this->autoSteps,
++                        'delta_time' => $this->deltaTime,
++                        'loop_interval' => $this->loopInterval
++                );
++        }
++
++        private function shutdown () : void
++        {
++                foreach ($this->clients as $client)
++                {
++                        $this->respond($client, $this->wrapResponse(true, array('message' => 'Daemon shutting down'), false));
++                        @fclose($client);
++                }
++                $this->clients = array();
++
++                if ($this->server)
++                {
++                        @fclose($this->server);
++                        $this->server = null;
++                }
++
++                if (file_exists($this->socketPath))
++                {
++                        @unlink($this->socketPath);
++                }
++
++                if (!empty($this->pidFile) && file_exists($this->pidFile))
++                {
++                        @unlink($this->pidFile);
++                }
++        }
++}
++
++?>
+diff --git a/class_universeSimulator.php b/class_universeSimulator.php
+new file mode 100644
+index 0000000000000000000000000000000000000000..f81a90d3fc7a81347e31fb16ac6999b679663ca5
+--- /dev/null
++++ b/class_universeSimulator.php
+@@ -0,0 +1,173 @@
++<?php // 7.3.0-dev
++class UniverseSimulator
++{
++        private $universe;
++        private $systemsByGalaxy;
++
++        public function __construct (Universe $universe)
++        {
++                $this->universe = $universe;
++                $this->systemsByGalaxy = array();
++        }
++
++        public function getUniverse () : Universe
++        {
++                return $this->universe;
++        }
++
++        public function bootstrap (array $blueprint) : void
++        {
++                $galaxies = $blueprint;
++                if (isset($blueprint['galaxies']) && is_array($blueprint['galaxies']))
++                {
++                        $galaxies = $blueprint['galaxies'];
++                }
++                foreach ($galaxies as $galaxySpec)
++                {
++                        $this->buildGalaxy($galaxySpec);
++                }
++        }
++
++        public function run (int $steps, float $deltaTime = 1.0) : array
++        {
++                $snapshots = array();
++                for ($i = 0; $i < $steps; $i++)
++                {
++                        $snapshots[] = $this->step($deltaTime);
++                }
++                return $snapshots;
++        }
++
++        public function step (float $deltaTime = 1.0) : array
++        {
++                $this->universe->advance($deltaTime);
++                return $this->collectSnapshot();
++        }
++
++        public function snapshot () : array
++        {
++                return $this->collectSnapshot();
++        }
++
++        public function getSystemsForGalaxy (string $galaxyName) : array
++        {
++                $clean = Utility::cleanse_string($galaxyName);
++                if (!isset($this->systemsByGalaxy[$clean])) return array();
++                return $this->systemsByGalaxy[$clean];
++        }
++
++        private function buildGalaxy (array $spec) : ?Galaxy
++        {
++                if (empty($spec['name']))
++                {
++                        Utility::write('Skipping unnamed galaxy specification', LOG_WARNING, L_CONSOLE);
++                        return null;
++                }
++                $name = Utility::cleanse_string($spec['name']);
++                $size = $spec['size'] ?? array();
++                $x = floatval($size['x'] ?? $this->universe->getFreeSpace()['x'] ?? 1.0);
++                $y = floatval($size['y'] ?? $this->universe->getFreeSpace()['y'] ?? 1.0);
++                $z = floatval($size['z'] ?? $this->universe->getFreeSpace()['z'] ?? 1.0);
++                if (!$this->universe->createGalaxy($name, $x, $y, $z))
++                {
++                        return $this->universe->getGalaxy($name);
++                }
++                $galaxy = $this->universe->getGalaxy($name);
++                if (!($galaxy instanceof Galaxy)) return null;
++                if (!isset($this->systemsByGalaxy[$name]))
++                {
++                        $this->systemsByGalaxy[$name] = array();
++                }
++                if (!empty($spec['systems']) && is_array($spec['systems']))
++                {
++                        foreach ($spec['systems'] as $systemSpec)
++                        {
++                                $system = $this->buildSystem($galaxy, $systemSpec);
++                                if ($system instanceof System)
++                                {
++                                        $this->systemsByGalaxy[$name][$system->getName()] = $system;
++                                }
++                        }
++                }
++                return $galaxy;
++        }
++
++        private function buildSystem (Galaxy $galaxy, array $spec) : ?System
++        {
++                if (empty($spec['name']))
++                {
++                        Utility::write('Skipping unnamed system specification', LOG_WARNING, L_CONSOLE);
++                        return null;
++                }
++                $name = Utility::cleanse_string($spec['name']);
++                $starSpec = $spec['star'] ?? array();
++                if (empty($starSpec['name']))
++                {
++                        $starSpec['name'] = $name . ' Prime';
++                }
++                $star = new Star(
++                        Utility::cleanse_string($starSpec['name']),
++                        floatval($starSpec['mass'] ?? Star::SOLAR_MASS),
++                        floatval($starSpec['radius'] ?? 6.9634E8),
++                        floatval($starSpec['luminosity'] ?? Star::SOLAR_LUMINOSITY),
++                        floatval($starSpec['temperature'] ?? 5772),
++                        strval($starSpec['spectral_class'] ?? 'G2V')
++                );
++                $system = $galaxy->createSystem($name, $star, $spec['planets'] ?? array());
++                if (isset($spec['time_step']))
++                {
++                        $system->setTimeStep(floatval($spec['time_step']));
++                }
++                if (isset($spec['propagation_mode']))
++                {
++                        $system->setPropagationMode(strval($spec['propagation_mode']));
++                }
++                if (isset($spec['softening_length']))
++                {
++                        $system->setGravitySofteningLength(floatval($spec['softening_length']));
++                }
++                return $system;
++        }
++
++        private function collectSnapshot () : array
++        {
++                $snapshot = array(
++                        'tick' => $this->universe->getTicks(),
++                        'galaxies' => array()
++                );
++                foreach ($this->universe->getGalaxies() as $galaxyName => $galaxy)
++                {
++                        if (!($galaxy instanceof Galaxy)) continue;
++                        $systems = array();
++                        foreach ($galaxy->getSystems() as $systemName => $system)
++                        {
++                                $systems[$systemName] = $this->collectSystemSnapshot($system);
++                        }
++                        $snapshot['galaxies'][$galaxyName] = array(
++                                'systems' => $systems
++                        );
++                }
++                return $snapshot;
++        }
++
++        private function collectSystemSnapshot (System $system) : array
++        {
++                $planets = array();
++                foreach ($system->getPlanets() as $planetName => $planet)
++                {
++                        $planets[$planetName] = array(
++                                'position' => $planet->getPosition(),
++                                'velocity' => $planet->getVelocity(),
++                                'habitability' => $planet->getHabitabilityScore(),
++                                'population' => $planet->getPopulationSummary()
++                        );
++                }
++                return array(
++                        'age' => $system->getAge(),
++                        'propagation_mode' => $system->getPropagationMode(),
++                        'object_count' => $system->countObjects(),
++                        'planets' => $planets
++                );
++        }
++}
++?>
+diff --git a/config.php b/config.php
+index c758cfa279d9f658882b7441f65a8348baadaeeb..3504a6a3e5bf5e6298bc0560eef3b32760681bd3 100644
+--- a/config.php
++++ b/config.php
+@@ -1,46 +1,47 @@
+ <?php // 7.3.0-dev
+ 
+ require_once __DIR__ . "/defines/defines.php";
+ require_once __DIR__ . "/defines.php";
+ require_once __DIR__ . "/required/class_preRequisites.php";
+ 
+ $required_extensions = <<<DONE
+ bcmath
+ date
+ pcntl
+ pcre
+ pgsql
+ posix
+ sockets
+ DONE;
+ 
+ $required_classes = <<<DONE
+ Logger,/logger/class_logger.php
+ Timer,/timer/class_timer.php
+ Utility,/utility/class_utility.php
+ Universe,/universe/class_universe.php
++UniverseSimulator,/universe/class_universeSimulator.php
+ Galaxy,/universe/class_galaxy.php
+ System,/universe/class_system.php
+ SystemObject,/universe/class_systemObject.php
+ Star,/universe/class_star.php
+ Planet,/universe/class_planet.php
+ Continent,/universe/class_continent.php
+ Country,/universe/class_country.php
+ City,/universe/class_city.php
+ House,/universe/class_house.php
+ Life,/universe/class_life.php
+ Animal,/universe/class_animal.php
+ Insect,/universe/class_insect.php
+ Plant,/universe/class_plant.php
+ Person,/universe/class_person.php
+ Skill,/universe/class_skill.php
+ Job,/universe/class_job.php
+ Particle,/universe/class_particle.php
+ Element,/universe/class_element.php
+ Compound,/universe/class_compound.php
+ Logger,/logger/class_logger.php
+ DONE;
+ 
+ foreach (explode(PHP_EOL,$required_extensions) as $required)
+ {
+ 	PreRequisites::add_extension($required, DEP_REQUIRED);
+diff --git a/docs/CHANGELOG.md b/docs/CHANGELOG.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..9a26e79619f476ce4597e51476a2f97fe5ab91a1
+--- /dev/null
++++ b/docs/CHANGELOG.md
+@@ -0,0 +1,8 @@
++# Change Log
++
++## [Unreleased]
++- Documented simulation tasks and readiness goals for hierarchical spawning.
++- Planned improvements for universe simulation orchestration.
++- Implemented hierarchical environment checks and readiness gating for countries and people.
++- Added a reusable UniverseSimulator orchestrator and updated the executable to drive galaxies, systems, and civilizations.
++- Ensured the UniverseSimulator tracks system registries per galaxy to avoid undefined index warnings during bootstrap.
+diff --git a/docs/SIMULATION_CHECKLIST.md b/docs/SIMULATION_CHECKLIST.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..32c3c1a892565fede55e910b9c6e7d69074cc985
+--- /dev/null
++++ b/docs/SIMULATION_CHECKLIST.md
+@@ -0,0 +1,8 @@
++# Simulation Checklist
++
++- [x] Review existing universe, galaxy, system, and planet classes.
++- [x] Define requirements for people viability gating.
++- [ ] Implement dynamic event pipeline for civilizations.
++- [x] Improve the universe simulator executable to orchestrate subobject ticks.
++- [x] Document readiness criteria for population spawning.
++- [x] Introduce a blueprint-driven bootstrapper that wires galaxies, systems, planets, and countries together.
+diff --git a/tools/universe_console.php b/tools/universe_console.php
+new file mode 100644
+index 0000000000000000000000000000000000000000..1a4de1286ee93815997c185959a013ccdc1d73bf
+--- /dev/null
++++ b/tools/universe_console.php
+@@ -0,0 +1,154 @@
++<?php // 7.3.0-dev
++
++require_once __DIR__ . '/../EnVision/class_envision.php';
++require_once __DIR__ . '/../config.php';
++
++function console_print_usage () : void
++{
++        echo "Universe console usage:" . PHP_EOL;
++        echo "  php tools/universe_console.php status [--socket=path]" . PHP_EOL;
++        echo "  php tools/universe_console.php snapshot [--socket=path]" . PHP_EOL;
++        echo "  php tools/universe_console.php advance [--steps=1] [--delta=3600] [--socket=path]" . PHP_EOL;
++        echo "  php tools/universe_console.php shutdown [--socket=path]" . PHP_EOL;
++        echo "  php tools/universe_console.php help" . PHP_EOL;
++}
++
++function console_parse_options (array $arguments) : array
++{
++        $options = array();
++        foreach ($arguments as $argument)
++        {
++                if (strpos($argument, '--') !== 0)
++                {
++                        continue;
++                }
++                $trimmed = substr($argument, 2);
++                if ($trimmed === '')
++                {
++                        continue;
++                }
++                if (strpos($trimmed, '=') !== false)
++                {
++                        list($key, $value) = explode('=', $trimmed, 2);
++                }
++                else
++                {
++                        $key = $trimmed;
++                        $value = true;
++                }
++                $options[$key] = $value;
++        }
++        return $options;
++}
++
++function console_connect (string $socketPath)
++{
++        $client = @stream_socket_client('unix://' . $socketPath, $errno, $errstr, 2);
++        if (!$client)
++        {
++                        fwrite(STDERR, "Unable to connect to universe daemon at {$socketPath}: {$errstr}" . PHP_EOL);
++                        exit(1);
++        }
++        stream_set_blocking($client, true);
++        return $client;
++}
++
++function console_send_command ($client, string $command, array $args = array()) : array
++{
++        $payload = json_encode(array(
++                'command' => $command,
++                'args' => $args
++        )) . PHP_EOL;
++        fwrite($client, $payload);
++        $response = fgets($client);
++        if ($response === false)
++        {
++                return array('ok' => false, 'error' => 'No response from daemon');
++        }
++        $decoded = json_decode($response, true);
++        if (!is_array($decoded))
++        {
++                return array('ok' => false, 'error' => 'Malformed response from daemon');
++        }
++        return $decoded;
++}
++
++function console_pretty_print ($data, int $indent = 0) : void
++{
++        if (is_array($data))
++        {
++                foreach ($data as $key => $value)
++                {
++                        if (is_array($value))
++                        {
++                                echo str_repeat(' ', $indent) . $key . ':' . PHP_EOL;
++                                console_pretty_print($value, $indent + 2);
++                        }
++                        else
++                        {
++                                echo str_repeat(' ', $indent) . $key . ': ' . $value . PHP_EOL;
++                        }
++                }
++        }
++        else
++        {
++                echo str_repeat(' ', $indent) . strval($data) . PHP_EOL;
++        }
++}
++
++$arguments = $_SERVER['argv'] ?? array();
++array_shift($arguments);
++$command = 'help';
++if (!empty($arguments) && strpos($arguments[0], '--') !== 0)
++{
++        $command = strtolower(array_shift($arguments));
++}
++$options = console_parse_options($arguments);
++
++$socketPath = $options['socket'] ?? (__DIR__ . '/../runtime/universe.sock');
++
++switch ($command)
++{
++        case 'status':
++        case 'snapshot':
++        case 'shutdown':
++        case 'ping':
++                $client = console_connect($socketPath);
++                $response = console_send_command($client, $command);
++                fclose($client);
++                if (!$response['ok'])
++                {
++                        fwrite(STDERR, ($response['error'] ?? 'Daemon error') . PHP_EOL);
++                        exit(1);
++                }
++                console_pretty_print($response);
++                break;
++
++        case 'advance':
++                $steps = isset($options['steps']) ? max(1, intval($options['steps'])) : 1;
++                $delta = isset($options['delta']) ? max(1.0, floatval($options['delta'])) : 3600.0;
++                $client = console_connect($socketPath);
++                $response = console_send_command($client, 'advance', array(
++                        'steps' => $steps,
++                        'delta_time' => $delta
++                ));
++                fclose($client);
++                if (!$response['ok'])
++                {
++                        fwrite(STDERR, ($response['error'] ?? 'Daemon error') . PHP_EOL);
++                        exit(1);
++                }
++                console_pretty_print($response);
++                break;
++
++        case 'help':
++                console_print_usage();
++                break;
++
++        default:
++                fwrite(STDERR, "Unknown command '{$command}'." . PHP_EOL);
++                console_print_usage();
++                exit(1);
++}
++
++?>
+diff --git a/universe.php b/universe.php
+index c51c8a966f504690840bad9ee8a46ef0a9fc3dfd..cb723cbdd9c142ddb48985b8263fcc80e5d24b2e 100644
+--- a/universe.php
++++ b/universe.php
+@@ -1,32 +1,294 @@
+ <?php // 7.3.0-dev
+ 
+ require_once __DIR__ . "/EnVision/class_envision.php";
+ require_once __DIR__ . "/config.php";
++require_once __DIR__ . "/class_universeDaemon.php";
+ Utility::init();
+ $C = new Logger("logs/console.log",true);
+ $A = new Logger("logs/access.log", true);
+ $E = new Logger("logs/error.log", true);
+ $D = new Logger("logs/debug.log", true);
+ Utility::setLog($C, L_CONSOLE);
+ Utility::setLog($A, L_ACCESS);
+ Utility::setLog($E, L_ERROR);
+ Utility::setLog($D, L_DEBUG);
+-Universe::init();
+ 
++Universe::init();
+ Universe::setMaxX (10000);
+ Universe::setMaxY (10000);
+ Universe::setMaxZ (10000);
+-echo "MAX SIZE: " . Universe::getMaxSize() . PHP_EOL;
+-echo "CUR SIZE: " . Universe::getCurrentSize() . PHP_EOL;
++Universe::setRotationSpeed (100);
++Universe::setExpansionRate (2.47, 1.22, 4.0);
++Universe::setLocation (5000,5000,5000);
++
++$universe = new Universe("Marstellar", Universe::getMaxX(), Universe::getMaxY(), Universe::getMaxZ());
++$simulator = new UniverseSimulator($universe);
++
++$blueprint = array(
++        'galaxies' => array(
++                array(
++                        'name' => 'Permeoid',
++                        'size' => array('x' => 42.323, 'y' => 44.131, 'z' => 20.12),
++                        'systems' => array(
++                                array(
++                                        'name' => 'Helios',
++                                        'star' => array(
++                                                'name' => 'Helios',
++                                                'mass' => Star::SOLAR_MASS * 1.05,
++                                                'radius' => 6.9634E8 * 1.02,
++                                                'luminosity' => Star::SOLAR_LUMINOSITY * 1.1,
++                                                'temperature' => 5900,
++                                                'spectral_class' => 'G1V'
++                                        ),
++                                        'time_step' => 3600,
++                                        'propagation_mode' => System::PROPAGATION_ANALYTIC,
++                                        'planets' => array(
++                                                array(
++                                                        'name' => 'Maris',
++                                                        'mass' => 5.972E24,
++                                                        'radius' => 6.371E6,
++                                                        'environment' => array(
++                                                                'temperature' => 15,
++                                                                'water' => 0.71,
++                                                                'atmosphere' => 0.78,
++                                                                'magnetosphere' => 0.62,
++                                                                'biosignatures' => 0.72
++                                                        ),
++                                                        'habitable' => true,
++                                                        'orbit' => array(
++                                                                'semi_major_axis' => 1.496E11,
++                                                                'period' => 365.25 * 86400,
++                                                                'eccentricity' => 0.0167
++                                                        ),
++                                                        'countries' => array(
++                                                                array(
++                                                                        'name' => 'Aurora Republic',
++                                                                        'profile' => array(
++                                                                                'infrastructure' => 0.65,
++                                                                                'technology' => 0.62,
++                                                                                'resources' => 0.68,
++                                                                                'stability' => 0.6,
++                                                                                'population_capacity' => 2000000,
++                                                                                'development_rate' => 2.0
++                                                                        ),
++                                                                        'spawn_people' => 50000
++                                                                )
++                                                        )
++                                                ),
++                                                array(
++                                                        'name' => 'Thorne',
++                                                        'mass' => 6.39E23,
++                                                        'radius' => 3.389E6,
++                                                        'environment' => array(
++                                                                'temperature' => -40,
++                                                                'water' => 0.1,
++                                                                'atmosphere' => 0.05,
++                                                                'magnetosphere' => 0.1,
++                                                                'biosignatures' => 0.0
++                                                        ),
++                                                        'habitable' => false,
++                                                        'orbit' => array(
++                                                                'semi_major_axis' => 2.279E11,
++                                                                'period' => 687 * 86400,
++                                                                'eccentricity' => 0.0934
++                                                        )
++                                                )
++                                        )
++                                )
++                        )
++                ),
++                array(
++                        'name' => 'Andromeda',
++                        'size' => array('x' => 45.333, 'y' => 48.313, 'z' => 55.98),
++                        'systems' => array(
++                                array(
++                                        'name' => 'Nadir',
++                                        'star' => array(
++                                                'name' => 'Nadir',
++                                                'mass' => Star::SOLAR_MASS * 0.8,
++                                                'radius' => 6.9634E8 * 0.9,
++                                                'luminosity' => Star::SOLAR_LUMINOSITY * 0.6,
++                                                'temperature' => 4800,
++                                                'spectral_class' => 'K3V'
++                                        ),
++                                        'time_step' => 7200,
++                                        'propagation_mode' => System::PROPAGATION_NUMERICAL,
++                                        'softening_length' => 1.0E7,
++                                        'planets' => array(
++                                                array(
++                                                        'name' => 'Ilyra',
++                                                        'mass' => 4.8E24,
++                                                        'radius' => 6.1E6,
++                                                        'environment' => array(
++                                                                'temperature' => 5,
++                                                                'water' => 0.6,
++                                                                'atmosphere' => 0.7,
++                                                                'magnetosphere' => 0.58,
++                                                                'biosignatures' => 0.55
++                                                        ),
++                                                        'habitable' => true,
++                                                        'orbit' => array(
++                                                                'semi_major_axis' => 1.1E11,
++                                                                'period' => 320 * 86400,
++                                                                'eccentricity' => 0.05
++                                                        ),
++                                                        'countries' => array(
++                                                                array(
++                                                                        'name' => 'Celes Dominion',
++                                                                        'profile' => array(
++                                                                                'infrastructure' => 0.6,
++                                                                                'technology' => 0.58,
++                                                                                'resources' => 0.61,
++                                                                                'stability' => 0.58,
++                                                                                'population_capacity' => 1500000,
++                                                                                'development_rate' => 1.5
++                                                                        ),
++                                                                        'spawn_people' => 25000
++                                                                )
++                                                        )
++                                                )
++                                        )
++                                )
++                        )
++                )
++        )
++);
+ 
+-//$u = new Universe("Marstellar",992.3,772.2,330.8);
++$simulator->bootstrap($blueprint);
+ 
+-require_once __DIR__ . "/build.php";
++function universe_parse_options (array $arguments) : array
++{
++        $options = array();
++        foreach ($arguments as $argument)
++        {
++                if (strpos($argument, '--') !== 0)
++                {
++                        continue;
++                }
++                $trimmed = substr($argument, 2);
++                if ($trimmed === '')
++                {
++                        continue;
++                }
++                if (strpos($trimmed, '=') !== false)
++                {
++                        list($key, $value) = explode('=', $trimmed, 2);
++                }
++                else
++                {
++                        $key = $trimmed;
++                        $value = true;
++                }
++                $options[$key] = $value;
++        }
++        return $options;
++}
++
++function universe_print_summary (Universe $universe) : void
++{
++        echo "Simulation completed (" . $universe->getTicks() . " ticks)." . PHP_EOL;
++        foreach ($universe->getGalaxies() as $galaxyName => $galaxy)
++        {
++                if (!($galaxy instanceof Galaxy))
++                {
++                        continue;
++                }
++                echo "Galaxy: {$galaxyName}" . PHP_EOL;
++                foreach ($galaxy->getSystems() as $systemName => $system)
++                {
++                        if (!($system instanceof System))
++                        {
++                                continue;
++                        }
++                        echo "  System: {$systemName} | Age: " . round($system->getAge(), 2) . "s | Objects: " . $system->countObjects() . PHP_EOL;
++                        foreach ($system->getPlanets() as $planetName => $planet)
++                        {
++                                if (!($planet instanceof Planet))
++                                {
++                                        continue;
++                                }
++                                $summary = $planet->getPopulationSummary();
++                                echo "    Planet: {$planetName} | Habitability: " . round($summary['habitability'], 2) . " | Population: " . $summary['population'] . PHP_EOL;
++                                foreach ($planet->getCountries() as $countryName => $country)
++                                {
++                                        if (!($country instanceof Country))
++                                        {
++                                                continue;
++                                        }
++                                        $report = $country->getReadinessReport();
++                                        echo "      Country: {$countryName} | Population: " . $report['population'] . "/" . $report['population_capacity'];
++                                        echo " | Development: " . round($country->getDevelopmentScore(), 2);
++                                        if (!$country->isReadyForPopulation())
++                                        {
++                                                echo " (developing)";
++                                        }
++                                        echo PHP_EOL;
++                                }
++                        }
++                }
++        }
++}
+ 
+-while (true) {
+-	$u->tick();
+-	var_export($u);
+-	sleep(5);
+-	echo $u->getTicks() . PHP_EOL;
++function universe_print_usage () : void
++{
++        echo "Universe simulator usage:" . PHP_EOL;
++        echo "  php universe.php start [--delta=3600] [--interval=1] [--auto-steps=1] [--socket=path] [--pid-file=path] [--no-daemonize]" . PHP_EOL;
++        echo "  php universe.php run-once [--steps=10] [--delta=3600]" . PHP_EOL;
++        echo "  php universe.php help" . PHP_EOL;
+ }
++
++$arguments = $_SERVER['argv'] ?? array();
++array_shift($arguments);
++$command = 'start';
++if (!empty($arguments) && strpos($arguments[0], '--') !== 0)
++{
++        $command = strtolower(array_shift($arguments));
++}
++$options = universe_parse_options($arguments);
++
++switch ($command)
++{
++        case 'start':
++                $daemonOptions = array(
++                        'socket' => $options['socket'] ?? (__DIR__ . '/runtime/universe.sock'),
++                        'pid_file' => $options['pid-file'] ?? (__DIR__ . '/runtime/universe.pid'),
++                        'delta_time' => isset($options['delta']) ? max(1.0, floatval($options['delta'])) : 3600.0,
++                        'loop_interval' => isset($options['interval']) ? max(0.1, floatval($options['interval'])) : 1.0,
++                        'auto_steps' => isset($options['auto-steps']) ? max(1, intval($options['auto-steps'])) : 1
++                );
++                $daemon = new UniverseDaemon($simulator, $daemonOptions);
++                $shouldExit = empty($options['no-daemonize']) && $daemon->daemonize();
++                if ($shouldExit)
++                {
++                        $pid = $daemon->getForkedPid();
++                        if ($pid !== null)
++                        {
++                                echo "Universe daemon started with PID {$pid}." . PHP_EOL;
++                        }
++                        else
++                        {
++                                echo "Universe daemon started." . PHP_EOL;
++                        }
++                        exit(0);
++                }
++                $daemon->run();
++                break;
++
++        case 'run-once':
++                $steps = isset($options['steps']) ? max(1, intval($options['steps'])) : 10;
++                $deltaTime = isset($options['delta']) ? max(1.0, floatval($options['delta'])) : 3600.0;
++                $simulator->run($steps, $deltaTime);
++                universe_print_summary($universe);
++                break;
++
++        case 'help':
++                universe_print_usage();
++                break;
++
++        default:
++                echo "Unknown command '{$command}'." . PHP_EOL;
++                universe_print_usage();
++                exit(1);
++}
++
+ ?>
+ 
+EOF
+)
