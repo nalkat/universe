@@ -1,6 +1,6 @@
 <?php // 7.3.0-dev
 
-require_once __DIR__ . "/EnVision/class_envision.php";
+//require_once __DIR__ . "/EnVision/class_envision.php";
 require_once __DIR__ . "/config.php";
 Utility::init();
 $C = new Logger("logs/console.log",true);

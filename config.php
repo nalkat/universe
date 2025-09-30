@@ -50,7 +50,7 @@ foreach (explode(PHP_EOL,$required_extensions) as $required)
 foreach (explode(PHP_EOL, $required_classes) as $required)
 {
 	list($class_name, $class_path) = explode(',',$required);
-	if (!PreRequisites::add_class($class_name, PHPROOT . $class_path, DEP_REQUIRED))
+	if (!PreRequisites::add_class($class_name, __DIR__ . $class_path, DEP_REQUIRED))
 	{
 		exit ("Failed to load required definition for $class_name from $class_path" . PHP_EOL);
 	}
