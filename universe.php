@@ -15,6 +15,20 @@ enum UniverseCommand: string
 require_once __DIR__ . "/telemetry/class_telemetry.php";
 require_once __DIR__ . "/config.php";
 require_once __DIR__ . "/class_universeDaemon.php";
+if (!is_dir(__DIR__ . '/logs'))
+{
+        if (!mkdir(__DIR__ . '/logs', 0775, true) && !is_dir(__DIR__ . '/logs'))
+        {
+                throw new RuntimeException('Failed to create log directory: ' . __DIR__ . '/logs');
+        }
+}
+if (!is_dir(__DIR__ . '/runtime'))
+{
+        if (!mkdir(__DIR__ . '/runtime', 0775, true) && !is_dir(__DIR__ . '/runtime'))
+        {
+                throw new RuntimeException('Failed to create runtime directory: ' . __DIR__ . '/runtime');
+        }
+}
 Utility::init();
 $C = new Logger("logs/console.log",true);
 $A = new Logger("logs/access.log", true);

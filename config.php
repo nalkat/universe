@@ -35,6 +35,8 @@ System,class_system.php
 SystemObject,class_systemObject.php
 Star,class_star.php
 Planet,class_planet.php
+Structure,class_structure.php
+Settlement,class_settlement.php
 Continent,class_continent.php
 Country,class_country.php
 City,class_city.php

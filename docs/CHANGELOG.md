@@ -13,3 +13,5 @@
 - Built a hierarchy inspector command for the console so operators can navigate galaxies, systems, planets, and populations while the daemon runs.
 - Modernized `universe.php` to leverage PHP 8.3 enum-based command parsing and stricter type handling.
 - Introduced a Tkinter desktop control panel to run simulator commands without relying on the console-only workflow.
+- Ensured settlement dependencies load before cities so simulator bootstrapping no longer triggers fatal errors.
+- Automatically create required runtime and logging directories when launching the simulator.
