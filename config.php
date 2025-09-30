@@ -23,7 +23,6 @@ sockets
 DONE;
 
 $required_classes = <<<DONE
-EnVision,EnVision/class_envision.php
 Logger,logger/class_logger.php
 Timer,timer/class_timer.php
 Utility,utility/class_utility.php
