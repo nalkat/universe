@@ -22,8 +22,24 @@ if importlib.util.find_spec("tkinter") is None:
     )
     sys.exit(1)
 
-import tkinter as tk
-from tkinter import messagebox, ttk
+try:
+    import tkinter as tk
+    from tkinter import messagebox, ttk
+except ModuleNotFoundError as exc:  # pragma: no cover - environment dependent
+    missing = exc.name or "tkinter"
+    sys.stderr.write(
+        "Universe GUI could not import '{missing}'. Ensure Tk support is installed for "
+        "the Python interpreter at {python}.\n".format(
+            missing=missing,
+            python=sys.executable,
+        )
+    )
+    if missing == "_tkinter":
+        sys.stderr.write(
+            "On Debian/Ubuntu, install the matching python3-tk package (e.g. sudo apt "
+            "install python3-tk) and verify Tk libraries are present.\n"
+        )
+    sys.exit(1)
 
 
 class UniverseGUI(tk.Tk):
