@@ -287,10 +287,18 @@ class UniverseGUI(tk.Tk):
 
         data = self._parse_catalog_output(output)
         if data is None:
+            preview = output[:500]
             if silent:
                 self._append_output("Unable to parse catalog output.\n")
             else:
-                messagebox.showerror("Universe Simulator", "Unable to parse catalog output.")
+                messagebox.showerror(
+                    "Universe Simulator",
+                    "Unable to parse catalog output. See console for details.",
+                )
+            if preview:
+                self._append_output("Catalog stdout preview:\n" + preview + "\n")
+            if result.stderr:
+                self._append_output("Catalog stderr:\n" + result.stderr + "\n")
             return
         self.catalog_data = data
         self._populate_catalog_tree(data)
@@ -318,15 +326,37 @@ class UniverseGUI(tk.Tk):
     def _parse_catalog_output(self, output: str) -> Dict[str, Any] | None:
         if not output:
             return None
+        decoder = json.JSONDecoder()
+        # First attempt: parse the full payload quickly.
         try:
-            return json.loads(output)
+            return decoder.decode(output)
         except json.JSONDecodeError:
-            snippet = self._extract_json_object(output)
-            if snippet is not None:
-                try:
-                    return json.loads(snippet)
-                except json.JSONDecodeError:
-                    return None
+            pass
+
+        # If logging noise or other text surrounds the JSON, walk the string and
+        # attempt a raw decode starting at each potential JSON boundary.
+        index = 0
+        length = len(output)
+        while index < length:
+            char = output[index]
+            if char.isspace():
+                index += 1
+                continue
+            if char not in "[{":
+                index += 1
+                continue
+            try:
+                obj, end = decoder.raw_decode(output[index:])
+            except json.JSONDecodeError:
+                index += 1
+                continue
+            if isinstance(obj, dict):
+                return obj
+            if isinstance(obj, list) and obj:
+                # Catalogs should be mapping-based, but accept a top-level list
+                # if one is provided and wrap it for callers.
+                return {"items": obj}
+            return None
         return None
 
     def _extract_json_object(self, output: str) -> Optional[str]:
