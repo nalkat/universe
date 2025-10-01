@@ -148,7 +148,7 @@ class Logger {
 		$this->Telemetry->functions_left++;
 	}
 
-	public function close (int $code = null)
+        public function close (?int $code = null)
 	{
 		$this->Telemetry->functions_entered++;
 		if ($code === null)
@@ -645,9 +645,16 @@ class Logger {
 			{
 				$logMessage .= $indent . "[" . $this->indentLevel . "] ";
 			}
-			$logMessage .= "$what" . PHP_EOL;
-		}
-		$logMessage = "[" . date('M d H:i:s', microtime(true)) . "] " . $logMessage;
+                $logMessage .= "$what" . PHP_EOL;
+        }
+
+        $microTimestamp = microtime(true);
+        $timestamp = \DateTimeImmutable::createFromFormat('U.u', sprintf('%.6F', $microTimestamp));
+        if ($timestamp instanceof \DateTimeImmutable) {
+                $logMessage = "[" . $timestamp->format('M d H:i:s.u') . "] " . $logMessage;
+        } else {
+                $logMessage = "[" . date('M d H:i:s', (int) $microTimestamp) . "] " . $logMessage;
+        }
 		$messageLen = strlen($logMessage);
 		if (is_resource($this->logfp))
 		{

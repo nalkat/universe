@@ -22,6 +22,7 @@
 - Added a startup guard that explains how to install Tk support when the GUI is launched on systems without the `tkinter` module.
 - Ensured settlement dependencies load before cities so simulator bootstrapping no longer triggers fatal errors.
 - Automatically create required runtime and logging directories when launching the simulator.
+- Updated legacy logger and utility helpers to use explicit nullable types and high-resolution timestamps compatible with PHP 8.3.
 - Removed PHP execution time and memory limits so the simulator can freely scale to massive procedurally generated worlds.
 - Procedurally generate galaxies, stellar systems, and planets at launch with reproducible seeds and CLI controls for galaxy,
   system, and planet counts.

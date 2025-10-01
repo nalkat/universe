@@ -664,7 +664,7 @@ class Universe
                 }
         }
 
-        public function createGalaxy (string $name, float $x = null, float $y = null, float $z = null) : bool
+        public function createGalaxy (string $name, ?float $x = null, ?float $y = null, ?float $z = null) : bool
         {
                 if ($x === null)
                 {

@@ -64,7 +64,7 @@ final class Utility
 	//   do something
 	// }
 	//
-	public static function getopts (string $optStr, array $longOptStr = null) : mixed
+        public static function getopts (string $optStr, ?array $longOptStr = null) : mixed
 	{
 		self::$Telemetry->functions_entered++;
 		self::$Telemetry->functions_left++;
@@ -392,7 +392,7 @@ final class Utility
 		return $t;
 	}
 
-	public static function isLog(Logger $resource = null) : bool
+        public static function isLog(?Logger $resource = null) : bool
 	{
 		self::$Telemetry->functions_entered++;
 		if (is_a($resource, "Logger")) {
@@ -406,7 +406,7 @@ final class Utility
 	}
 
 	// return bytes written if writing to a socket, false on error, or true if successfully written to a log
-	public static function write (string $what = null, int $logLevel = null, int $oFlags = null)
+        public static function write (?string $what = null, ?int $logLevel = null, ?int $oFlags = null)
 	{
 		self::$Telemetry->functions_entered++;
 		try 
@@ -478,7 +478,7 @@ final class Utility
 	}
 
 	// return bytes written if writing to a socket, false on error, or true if successfully written to a log
-	public static function ncWrite (string $what, int $logLevel = null, int $oFlags = null) 
+        public static function ncWrite (string $what, ?int $logLevel = null, ?int $oFlags = null)
 	{
 		self::$Telemetry->functions_entered++;
 		try
@@ -654,7 +654,7 @@ final class Utility
 	}
 
 	// convert a php array into a form that is compatible with postgres tables
-	public static function db_array_convert (array $db_array = null) : string
+        public static function db_array_convert (?array $db_array = null) : string
 	{
 		self::$Telemetry->functions_entered++;
 		if ($db_array === null) {
@@ -701,7 +701,7 @@ final class Utility
 		}
 	}
 
-	public static function extractPatch (string $patch_stream = null) : string
+        public static function extractPatch (?string $patch_stream = null) : string
 	{
 		self::$Telemetry->functions_entered++;
 		if (is_null($patch_stream) || !is_string($patch_stream) || empty($patch_stream))
@@ -745,7 +745,7 @@ final class Utility
 		return $patch;
 	}
 
-	public static function extractPatchSetInfo (string $message_header = null) : array
+        public static function extractPatchSetInfo (?string $message_header = null) : array
 	{
 		self::$Telemetry->functions_entered++;
 		if (is_null($message_header) || !is_string($message_header) || is_numeric($message_header) || empty($message_header))
