@@ -27,6 +27,7 @@ Telemetry,telemetry/class_telemetry.php
 Logger,logger/class_logger.php
 Timer,timer/class_timer.php
 Utility,utility/class_utility.php
+LoreForge,utility/class_loreForge.php
 Universe,class_universe.php
 UniverseDaemon,class_universeDaemon.php
 UniverseSimulator,class_universeSimulator.php

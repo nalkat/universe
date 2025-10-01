@@ -16,6 +16,7 @@ class SystemObject
         protected $age;
         protected $destroyed;
         protected $destructionReason;
+        protected $chronicle;
 
         public function __construct (string $name, float $mass = 0.0, float $radius = 0.0, ?array $position = null, ?array $velocity = null)
         {
@@ -31,6 +32,8 @@ class SystemObject
                 $this->age = floatval(0);
                 $this->destroyed = false;
                 $this->destructionReason = null;
+                $this->chronicle = array();
+                $this->addChronicleEntry('formation', sprintf('%s entered the records with mass %.2e kg.', $this->name, $this->mass));
         }
 
         protected function sanitizeVector (?array $vector) : array
@@ -197,6 +200,46 @@ class SystemObject
         public function isDestroyed () : bool
         {
                 return $this->destroyed;
+        }
+
+        public function addChronicleEntry (string $type, string $text, ?float $timestamp = null, array $participants = array()) : void
+        {
+                $normalized = trim(strval($text));
+                if ($normalized === '') return;
+                $entry = array(
+                        'type' => Utility::cleanse_string($type === '' ? 'event' : $type),
+                        'text' => $normalized,
+                        'timestamp' => ($timestamp === null) ? $this->age : floatval($timestamp),
+                        'participants' => array_values(array_unique(array_map('strval', $participants)))
+                );
+                $this->chronicle[] = $entry;
+                if (count($this->chronicle) > 48)
+                {
+                        $this->chronicle = array_slice($this->chronicle, -48);
+                }
+        }
+
+        public function importChronicle (array $entries) : void
+        {
+                $this->chronicle = array();
+                foreach ($entries as $entry)
+                {
+                        if (!is_array($entry)) continue;
+                        $this->addChronicleEntry(
+                                strval($entry['type'] ?? 'event'),
+                                strval($entry['text'] ?? ''),
+                                isset($entry['timestamp']) ? floatval($entry['timestamp']) : null,
+                                is_array($entry['participants'] ?? null) ? $entry['participants'] : array()
+                        );
+                }
+        }
+
+        public function getChronicle (?int $limit = null) : array
+        {
+                if ($limit === null) return $this->chronicle;
+                $limit = max(0, intval($limit));
+                if ($limit === 0) return array();
+                return array_slice($this->chronicle, -$limit);
         }
 
         public function destroy (string $reason = 'unknown') : void

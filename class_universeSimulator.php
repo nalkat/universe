@@ -28,12 +28,17 @@ class UniverseSimulator
                 }
         }
 
-        public function run (int $steps, float $deltaTime = 1.0) : array
+        public function run (int $steps, float $deltaTime = 1.0, float $sleepBetweenSteps = 0.0) : array
         {
                 $snapshots = array();
+                $sleep = max(0.0, $sleepBetweenSteps);
                 for ($i = 0; $i < $steps; $i++)
                 {
                         $snapshots[] = $this->step($deltaTime);
+                        if ($sleep > 0.0 && $i < ($steps - 1))
+                        {
+                                usleep((int) round($sleep * 1000000.0));
+                        }
                 }
                 return $snapshots;
         }
@@ -78,6 +83,7 @@ class UniverseSimulator
                 {
                         $this->systemsByGalaxy[$name] = array();
                 }
+                $builtSystems = 0;
                 if (!empty($spec['systems']) && is_array($spec['systems']))
                 {
                         foreach ($spec['systems'] as $systemSpec)
@@ -86,8 +92,18 @@ class UniverseSimulator
                                 if ($system instanceof System)
                                 {
                                         $this->systemsByGalaxy[$name][$system->getName()] = $system;
+                                        $builtSystems++;
                                 }
                         }
+                }
+                $lore = LoreForge::describeGalaxy($galaxy, array('systems' => $builtSystems));
+                if (isset($lore['description']))
+                {
+                        $galaxy->setDescription($lore['description']);
+                }
+                if (!empty($lore['chronicle']))
+                {
+                        $galaxy->importChronicle($lore['chronicle']);
                 }
                 return $galaxy;
         }
@@ -125,6 +141,20 @@ class UniverseSimulator
                 if (isset($spec['softening_length']))
                 {
                         $system->setGravitySofteningLength(floatval($spec['softening_length']));
+                }
+                $lore = LoreForge::describeSystem($system, $spec);
+                if (isset($lore['description']))
+                {
+                        $system->setDescription($lore['description']);
+                }
+                if (!empty($lore['chronicle']))
+                {
+                        $system->importChronicle($lore['chronicle']);
+                }
+                $starLore = LoreForge::describeStar($star, array('system' => $system));
+                if (!empty($starLore['chronicle']))
+                {
+                        $star->importChronicle($starLore['chronicle']);
                 }
                 return $system;
         }

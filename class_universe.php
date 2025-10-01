@@ -235,15 +235,20 @@ class Universe
 
 	///////////////// INSTANCE METHODS //////////////////
 
-	public function __construct (string $name, float $max_x, float $max_y, float $max_z)
-	{
-		$this->initializeObject();
-		$this->name = Utility::cleanse_string($name);
-		self::setMaxX ($max_x);
-		self::setMaxY ($max_y);
-		self::setMaxZ ($max_z);
-		self::tick();
-	}
+        public function __construct (string $name, float $max_x, float $max_y, float $max_z)
+        {
+                $this->initializeObject();
+                $this->name = Utility::cleanse_string($name);
+                self::setMaxX ($max_x);
+                self::setMaxY ($max_y);
+                self::setMaxZ ($max_z);
+                self::tick();
+        }
+
+        public function getName () : string
+        {
+                return $this->name;
+        }
 	
 	public function __destruct ()
 	{

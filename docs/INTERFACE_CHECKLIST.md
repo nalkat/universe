@@ -4,4 +4,5 @@
 - [x] Surface procedural generation options (seed, galaxy/system/planet counts) in the control panel.
 - [ ] Integrate GIMP-generated artwork and theming assets for the control panel.
 - [ ] Add real-time telemetry overlays that stream simulator metrics into the GUI.
-- [ ] Present planetary weather cycles and narrative object summaries inside the control panel views.
+- [x] Present planetary weather cycles and narrative object summaries inside the control panel views.
+- [x] Implement a browsable universe catalog with hierarchical object selection, visuals, and chronicles.

@@ -19,6 +19,7 @@ class Person extends Life
         private $calmAccumulator;
         private $backstory;
         private $relationships;
+        private $chronicle;
 
         public function __construct (string $name, ?Country $homeCountry = null, array $traits = array())
         {
@@ -41,6 +42,7 @@ class Person extends Life
                 $this->calmAccumulator = 0.0;
                 $this->backstory = '';
                 $this->relationships = array();
+                $this->chronicle = array();
                 if ($this->mortalityModel === '')
                 {
                         $this->mortalityModel = 'finite';
@@ -242,6 +244,10 @@ class Person extends Life
                 $normalized = trim(strval($backstory));
                 $this->backstory = $normalized;
                 $this->setTrait('backstory', $normalized);
+                if ($normalized !== '')
+                {
+                        $this->addChronicleEntry('backstory', $normalized);
+                }
         }
 
         public function getBackstory () : string
@@ -254,11 +260,60 @@ class Person extends Life
                 $key = Utility::cleanse_string($role);
                 if ($key === '') return;
                 $this->relationships[$key] = strval($name);
+                $this->addChronicleEntry('relationship', sprintf('%s acknowledged %s as %s.', $this->getName(), strval($name), $key));
         }
 
         public function getRelationships () : array
         {
                 return $this->relationships;
+        }
+
+        public function addChronicleEntry (string $type, string $text, ?float $timestamp = null, array $participants = array()) : void
+        {
+                $normalized = trim(strval($text));
+                if ($normalized === '') return;
+                $participantList = array();
+                if (!empty($participants) && is_array($participants))
+                {
+                        $participantList = array_map('strval', $participants);
+                }
+                $entry = array(
+                        'type' => Utility::cleanse_string($type === '' ? 'event' : $type),
+                        'text' => $normalized,
+                        'timestamp' => ($timestamp === null) ? $this->age : floatval($timestamp),
+                        'participants' => array_values(array_unique(array_merge(array($this->getName()), $participantList)))
+                );
+                $this->chronicle[] = $entry;
+                if (count($this->chronicle) > 64)
+                {
+                        $this->chronicle = array_slice($this->chronicle, -64);
+                }
+        }
+
+        public function getChronicle (?int $limit = null) : array
+        {
+                $entries = $this->chronicle;
+                $entries[] = array(
+                        'type' => 'status',
+                        'text' => sprintf('%s is %.1f local years into their journey.', $this->getName(), $this->getAgeInYears()),
+                        'timestamp' => $this->age,
+                        'participants' => array($this->getName()),
+                        'synthetic' => true
+                );
+                if ($this->isAlive() === false)
+                {
+                        $entries[] = array(
+                                'type' => 'status',
+                                'text' => sprintf('%s currently rests beyond the mortal coil.', $this->getName()),
+                                'timestamp' => $this->age,
+                                'participants' => array($this->getName()),
+                                'synthetic' => true
+                        );
+                }
+                if ($limit === null) return $entries;
+                $limit = max(0, intval($limit));
+                if ($limit === 0) return array();
+                return array_slice($entries, -$limit);
         }
 
         public function tick (float $deltaTime = 1.0) : void

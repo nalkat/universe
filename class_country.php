@@ -615,6 +615,29 @@ class Country
                 {
                         array_shift($this->chronicle);
                 }
+                foreach ($entry['participants'] as $participant)
+                {
+                        $person = $this->findPersonByName($participant);
+                        if ($person instanceof Person)
+                        {
+                                $person->addChronicleEntry($entry['type'], $entry['text'], $entry['timestamp'], $entry['participants']);
+                        }
+                }
+        }
+
+        private function findPersonByName (string $name) : ?Person
+        {
+                $clean = Utility::cleanse_string($name);
+                if ($clean === '') return null;
+                foreach ($this->people as $person)
+                {
+                        if (!($person instanceof Person)) continue;
+                        if (Utility::cleanse_string($person->getName()) === $clean)
+                        {
+                                return $person;
+                        }
+                }
+                return null;
         }
 
         private function rebalanceEmployment () : void

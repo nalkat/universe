@@ -5,6 +5,7 @@ enum UniverseCommand: string
         case Start = 'start';
         case RunOnce = 'run-once';
         case Help = 'help';
+        case Catalog = 'catalog';
 
         public static function fromString(string $value): ?self
         {
@@ -936,13 +937,19 @@ function universe_print_usage () : void
 {
         echo "Universe simulator usage:" . PHP_EOL;
         echo "  php universe.php start [--delta=3600] [--interval=1] [--auto-steps=1] [--socket=path] [--pid-file=path] [--no-daemonize]" . PHP_EOL;
-        echo "  php universe.php run-once [--steps=10] [--delta=3600]" . PHP_EOL;
+        echo "  php universe.php run-once [--steps=10] [--delta=3600] [--tick-delay=0]" . PHP_EOL;
+        echo "  php universe.php catalog [--format=json] [--pretty] [--people-limit=50] [--chronicle-limit=12]" . PHP_EOL;
         echo "  php universe.php help" . PHP_EOL;
         echo PHP_EOL . "Generation options:" . PHP_EOL;
         echo "  --seed=<int>                Use a deterministic RNG seed for the generated universe" . PHP_EOL;
         echo "  --galaxies=<int>            Override the number of galaxies generated" . PHP_EOL;
         echo "  --systems-per-galaxy=<int>  Target system count per galaxy before variance" . PHP_EOL;
         echo "  --planets-per-system=<int>  Target planet count per system before variance" . PHP_EOL;
+        echo PHP_EOL . "Catalog options:" . PHP_EOL;
+        echo "  --people-limit=<int>        Maximum number of citizens per country to include (default 50)" . PHP_EOL;
+        echo "  --chronicle-limit=<int>     Maximum chronicle entries to retain per object (default 12)" . PHP_EOL;
+        echo "  --format=json               Output format (currently only json)" . PHP_EOL;
+        echo "  --pretty                    Pretty-print JSON output" . PHP_EOL;
 }
 
 switch ($command ?? UniverseCommand::Start)
@@ -997,13 +1004,469 @@ switch ($command ?? UniverseCommand::Start)
                 {
                         Utility::write('Run-once delta of ' . $deltaTime . ' seconds supplied; executing without clamping.', LOG_WARNING, L_CONSOLE);
                 }
-                $simulator->run($steps, $deltaTime);
+                $tickDelay = isset($options['tick-delay']) ? floatval((string)$options['tick-delay']) : 0.0;
+                if ($tickDelay < 0.0)
+                {
+                        Utility::write('Tick delay cannot be negative; using 0.', LOG_WARNING, L_CONSOLE);
+                        $tickDelay = 0.0;
+                }
+                $simulator->run($steps, $deltaTime, $tickDelay);
                 universe_print_summary($universe);
+                break;
+
+        case UniverseCommand::Catalog:
+                $peopleLimit = isset($options['people-limit']) ? max(0, intval((string)$options['people-limit'])) : 50;
+                $chronicleLimit = isset($options['chronicle-limit']) ? max(0, intval((string)$options['chronicle-limit'])) : 12;
+                $format = strtolower(strval($options['format'] ?? 'json'));
+                $pretty = array_key_exists('pretty', $options);
+                $catalog = universe_build_catalog($universe, array(
+                        'people_limit' => $peopleLimit,
+                        'chronicle_limit' => $chronicleLimit
+                ));
+                if ($format !== 'json')
+                {
+                        echo "Unsupported catalog format '{$format}'." . PHP_EOL;
+                        exit(1);
+                }
+                $flags = JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES;
+                if ($pretty)
+                {
+                        $flags |= JSON_PRETTY_PRINT;
+                }
+                $encoded = json_encode($catalog, $flags);
+                if ($encoded === false)
+                {
+                        echo 'Failed to encode catalog: ' . json_last_error_msg() . PHP_EOL;
+                        exit(1);
+                }
+                echo $encoded . PHP_EOL;
                 break;
 
         case UniverseCommand::Help:
                 universe_print_usage();
                 break;
+}
+
+
+function universe_random_choice (array $values, $fallback = null)
+{
+        if (empty($values)) return $fallback;
+        return $values[mt_rand(0, count($values) - 1)];
+}
+
+function universe_generate_symbol (string $name, array &$used) : string
+{
+        $letters = preg_replace('/[^A-Za-z]/', '', $name);
+        $letters = ($letters === '') ? 'Element' : $letters;
+        $letters = ucfirst(strtolower($letters));
+        $primary = strtoupper($letters[0]);
+        $secondary = (strlen($letters) > 1) ? strtolower($letters[1]) : '';
+        $symbol = $primary . $secondary;
+        if (!isset($used[$symbol]))
+        {
+                $used[$symbol] = true;
+                return $symbol;
+        }
+        for ($i = 2; $i < strlen($letters); $i++)
+        {
+                $candidate = $primary . strtolower($letters[$i]);
+                if (!isset($used[$candidate]))
+                {
+                        $used[$candidate] = true;
+                        return $candidate;
+                }
+        }
+        do
+        {
+                $candidate = chr(mt_rand(65, 90)) . chr(mt_rand(97, 122));
+        }
+        while (isset($used[$candidate]));
+        $used[$candidate] = true;
+        return $candidate;
+}
+
+function universe_build_catalog (Universe $universe, array $options = array()) : array
+{
+        $peopleLimit = max(0, intval($options['people_limit'] ?? 50));
+        $chronicleLimit = max(0, intval($options['chronicle_limit'] ?? 12));
+
+        $lore = LoreForge::describeUniverse($universe);
+        $root = array(
+                'category' => 'universe',
+                'icon' => 'universe',
+                'name' => $universe->getName(),
+                'summary' => $lore['summary'] ?? '',
+                'description' => $lore['description'] ?? '',
+                'statistics' => $lore['statistics'] ?? array(),
+                'chronicle' => array_slice($lore['chronicle'] ?? array(), -$chronicleLimit),
+                'children' => array()
+        );
+
+        $totals = array('galaxies' => 0, 'systems' => 0, 'planets' => 0, 'habitable' => 0, 'countries' => 0, 'population' => 0);
+        foreach ($universe->getGalaxies() as $galaxyName => $galaxy)
+        {
+                if (!($galaxy instanceof Galaxy)) continue;
+                $root['children'][] = universe_catalog_galaxy($galaxy, $chronicleLimit, $peopleLimit, $totals);
+        }
+
+        $materials = universe_generate_material_catalog(array('chronicle_limit' => $chronicleLimit));
+        if (!empty($materials))
+        {
+                $root['children'][] = $materials;
+        }
+
+        $root['statistics']['galaxies'] = $totals['galaxies'];
+        $root['statistics']['systems'] = $totals['systems'];
+        $root['statistics']['planets'] = $totals['planets'];
+        $root['statistics']['habitable_planets'] = $totals['habitable'];
+        $root['statistics']['countries'] = $totals['countries'];
+        $root['statistics']['population'] = $totals['population'];
+
+        return $root;
+}
+
+function universe_catalog_galaxy (Galaxy $galaxy, int $chronicleLimit, int $peopleLimit, array &$totals) : array
+{
+        $systems = array();
+        foreach ($galaxy->getSystems() as $system)
+        {
+                if (!($system instanceof System)) continue;
+                $systems[] = universe_catalog_system($system, $chronicleLimit, $peopleLimit, $totals);
+        }
+        $totals['galaxies']++;
+        $bounds = method_exists($galaxy, 'getBounds') ? $galaxy->getBounds() : array();
+        $chronicle = method_exists($galaxy, 'getChronicle') ? $galaxy->getChronicle($chronicleLimit) : array();
+        return array(
+                'category' => 'galaxy',
+                'icon' => 'galaxy',
+                'name' => $galaxy->name,
+                'summary' => sprintf('%d systems recorded.', count($systems)),
+                'description' => method_exists($galaxy, 'getDescription') ? $galaxy->getDescription() : '',
+                'statistics' => array(
+                        'system_count' => count($systems),
+                        'bounds' => $bounds
+                ),
+                'chronicle' => array_slice($chronicle, -$chronicleLimit),
+                'children' => $systems
+        );
+}
+
+function universe_catalog_system (System $system, int $chronicleLimit, int $peopleLimit, array &$totals) : array
+{
+        $children = array();
+        $star = $system->getPrimaryStar();
+        if ($star instanceof Star)
+        {
+                $children[] = universe_catalog_star($star, $chronicleLimit);
+        }
+        $planets = array();
+        foreach ($system->getPlanets() as $planet)
+        {
+                if (!($planet instanceof Planet)) continue;
+                $planets[] = universe_catalog_planet($planet, $chronicleLimit, $peopleLimit, $totals);
+        }
+        $children = array_merge($children, $planets);
+        $totals['systems']++;
+        $chronicle = method_exists($system, 'getChronicle') ? $system->getChronicle($chronicleLimit) : array();
+        return array(
+                'category' => 'system',
+                'icon' => 'system',
+                'name' => $system->getName(),
+                'summary' => sprintf('%d planets orbit within the %s cadence.', count($planets), $system->getPropagationMode()),
+                'description' => method_exists($system, 'getDescription') ? $system->getDescription() : '',
+                'statistics' => array(
+                        'age_seconds' => $system->getAge(),
+                        'propagation_mode' => $system->getPropagationMode(),
+                        'time_step_seconds' => $system->getTimeStep()
+                ),
+                'chronicle' => array_slice($chronicle, -$chronicleLimit),
+                'children' => $children
+        );
+}
+
+function universe_catalog_star (Star $star, int $chronicleLimit) : array
+{
+        $massRatio = ($star->getMass() > 0) ? $star->getMass() / Star::SOLAR_MASS : 0.0;
+        $chronicle = $star->getChronicle($chronicleLimit);
+        $lore = LoreForge::describeStar($star, array());
+        if (!empty($lore['chronicle']))
+        {
+                $chronicle = array_merge($chronicle, $lore['chronicle']);
+        }
+        return array(
+                'category' => 'star',
+                'icon' => 'star',
+                'name' => $star->getName(),
+                'summary' => sprintf('%s star at %.2f solar masses.', $star->getSpectralClass(), $massRatio),
+                'description' => $star->getDescription(),
+                'statistics' => array(
+                        'mass' => $star->getMass(),
+                        'radius' => $star->getRadius(),
+                        'luminosity' => $star->getLuminosity(),
+                        'temperature' => $star->getTemperature(),
+                        'stage' => $star->getStage()
+                ),
+                'chronicle' => array_slice($chronicle, -$chronicleLimit),
+                'children' => array()
+        );
+}
+
+function universe_catalog_planet (Planet $planet, int $chronicleLimit, int $peopleLimit, array &$totals) : array
+{
+        $summary = $planet->getPopulationSummary();
+        $countries = array();
+        foreach ($planet->getCountries() as $country)
+        {
+                if (!($country instanceof Country)) continue;
+                $countries[] = universe_catalog_country($country, $chronicleLimit, $peopleLimit, $totals);
+        }
+        $totals['planets']++;
+        if ($planet->isReadyForCivilization())
+        {
+                $totals['habitable']++;
+        }
+        $chronicle = $planet->getChronicle($chronicleLimit);
+        $lore = LoreForge::describePlanet($planet, array());
+        if (!empty($lore['chronicle']))
+        {
+                $chronicle = array_merge($chronicle, $lore['chronicle']);
+        }
+        return array(
+                'category' => 'planet',
+                'icon' => 'planet',
+                'name' => $planet->getName(),
+                'summary' => sprintf('%s world with %d countries and population %d.',
+                        ucfirst(strval($summary['classification'] ?? $planet->getHabitabilityClassification())),
+                        count($countries),
+                        intval($summary['population'] ?? 0)
+                ),
+                'description' => $planet->getDescription(),
+                'statistics' => array(
+                        'habitability_score' => $summary['habitability'] ?? $planet->getHabitabilityScore(),
+                        'classification' => $summary['classification'] ?? $planet->getHabitabilityClassification(),
+                        'population' => $summary['population'] ?? 0,
+                        'country_count' => count($countries),
+                        'environment' => $planet->getEnvironmentSnapshot(),
+                        'timekeeping' => $planet->getTimekeepingProfile()
+                ),
+                'chronicle' => array_slice($chronicle, -$chronicleLimit),
+                'children' => $countries,
+                'metadata' => array(
+                        'weather' => array(
+                                'current' => $planet->getCurrentWeather(),
+                                'history' => array_slice($planet->getWeatherHistory($chronicleLimit), 0, $chronicleLimit)
+                        )
+                )
+        );
+}
+
+function universe_catalog_country (Country $country, int $chronicleLimit, int $peopleLimit, array &$totals) : array
+{
+        $totals['countries']++;
+        $totals['population'] += $country->getPopulation();
+        $people = $country->getPeople();
+        $children = array();
+        if ($peopleLimit > 0)
+        {
+                $selected = array_slice($people, 0, $peopleLimit);
+        }
+        else
+        {
+                $selected = array();
+        }
+        foreach ($selected as $person)
+        {
+                if (!($person instanceof Person)) continue;
+                $children[] = universe_catalog_person($person, $chronicleLimit);
+        }
+        $chronicle = $country->getChronicle();
+        $description = $country->getDescription();
+        $metadata = array('cultural_backdrop' => $country->getCulturalBackdrop());
+        if ($peopleLimit > 0 && count($people) > $peopleLimit)
+        {
+                $metadata['omitted_citizens'] = count($people) - $peopleLimit;
+        }
+        return array(
+                'category' => 'country',
+                'icon' => 'country',
+                'name' => $country->getName(),
+                'summary' => sprintf('Population %d of %d capacity.', $country->getPopulation(), $country->getPopulationCapacity()),
+                'description' => $description,
+                'statistics' => array(
+                        'population' => $country->getPopulation(),
+                        'capacity' => $country->getPopulationCapacity(),
+                        'resources' => $country->getResourceReport()
+                ),
+                'chronicle' => array_slice($chronicle, -$chronicleLimit),
+                'children' => $children,
+                'metadata' => $metadata
+        );
+}
+
+function universe_catalog_person (Person $person, int $chronicleLimit) : array
+{
+        $home = $person->getHomeCountry();
+        $chronicle = $person->getChronicle($chronicleLimit);
+        $lore = LoreForge::describePerson($person, array());
+        if (!empty($lore['chronicle']))
+        {
+                $chronicle = array_merge($chronicle, $lore['chronicle']);
+        }
+        return array(
+                'category' => 'person',
+                'icon' => 'person',
+                'name' => $person->getName(),
+                'summary' => ($person->getProfession() === null)
+                        ? sprintf('Citizen of %s.', ($home instanceof Country) ? $home->getName() : 'unknown origins')
+                        : sprintf('%s of %s.', ucfirst($person->getProfession()), ($home instanceof Country) ? $home->getName() : 'unknown origins'),
+                'description' => $person->getBackstory(),
+                'statistics' => array(
+                        'age_years' => round($person->getAgeInYears(), 2),
+                        'life_expectancy_years' => $person->getLifeExpectancyYears(),
+                        'senescence_years' => $person->getSenescenceStartYears(),
+                        'mortality_model' => $person->getMortalityModel(),
+                        'relationships' => $person->getRelationships(),
+                        'home_country' => ($home instanceof Country) ? $home->getName() : null
+                ),
+                'chronicle' => array_slice($chronicle, -$chronicleLimit),
+                'children' => array()
+        );
+}
+
+function universe_generate_material_catalog (array $options = array()) : array
+{
+        $chronicleLimit = max(0, intval($options['chronicle_limit'] ?? 12));
+        $elementCount = max(4, intval($options['element_count'] ?? 12));
+        $compoundCount = max(2, intval($options['compound_count'] ?? 8));
+
+        $elementEntries = array();
+        $elements = array();
+        $usedSymbols = array();
+        for ($i = 0; $i < $elementCount; $i++)
+        {
+                $name = universe_generate_unique_name('element', 3);
+                $symbol = universe_generate_symbol($name, $usedSymbols);
+                $atomicNumber = mt_rand(6, 118);
+                $properties = array(
+                        'group' => mt_rand(1, 18),
+                        'period' => mt_rand(1, 7),
+                        'category' => universe_random_choice(array('alkali metal', 'alkaline earth', 'transition metal', 'metalloid', 'noble gas', 'halogen', 'lanthanide', 'actinide', 'superfluid', 'synthetic element'), 'unknown'),
+                        'state_at_stp' => universe_random_choice(array('solid', 'liquid', 'gas', 'plasma'), 'solid'),
+                        'atomic_mass' => mt_rand(10, 260) + mt_rand() / mt_getrandmax()
+                );
+                $element = new Element($name, $symbol, $atomicNumber, $properties);
+                $elements[$symbol] = $element;
+                $lore = LoreForge::describeElement($element, array());
+                $elementEntries[] = array(
+                        'category' => 'element',
+                        'icon' => 'element',
+                        'name' => $element->getName(),
+                        'summary' => sprintf('Atomic number %d, %s at STP.', $element->getAtomicNumber(), $element->getStateAtSTP()),
+                        'description' => $lore['description'],
+                        'statistics' => array(
+                                'symbol' => $element->getSymbol(),
+                                'atomic_number' => $element->getAtomicNumber(),
+                                'atomic_mass' => $element->getAtomicMass(),
+                                'group' => $element->getGroup(),
+                                'period' => $element->getPeriod(),
+                                'category' => $element->getCategory(),
+                                'state' => $element->getStateAtSTP()
+                        ),
+                        'chronicle' => array_slice($lore['chronicle'], -$chronicleLimit),
+                        'children' => array()
+                );
+        }
+
+        $compoundEntries = array();
+        $elementSymbols = array_keys($elements);
+        if (!empty($elementSymbols))
+        {
+                for ($i = 0; $i < $compoundCount; $i++)
+                {
+                        shuffle($elementSymbols);
+                        $componentTotal = mt_rand(2, min(4, count($elementSymbols)));
+                        $components = array();
+                        $molarMass = 0.0;
+                        for ($j = 0; $j < $componentTotal; $j++)
+                        {
+                                $symbol = $elementSymbols[$j];
+                                $ratio = mt_rand(1, 4);
+                                $components[$symbol] = $ratio;
+                                $molarMass += $elements[$symbol]->getAtomicMass() * $ratio;
+                        }
+                        $name = universe_generate_unique_name('compound', 2);
+                        $properties = array(
+                                'classification' => universe_random_choice(array('inorganic', 'organic', 'alloy', 'ceramic', 'polymeric'), 'inorganic'),
+                                'state_at_stp' => universe_random_choice(array('solid', 'liquid', 'gas'), 'solid'),
+                                'density' => mt_rand(5, 200) / 10.0,
+                                'molar_mass' => $molarMass
+                        );
+                        $compound = new Compound($name, $components, $properties);
+                        $lore = LoreForge::describeCompound($compound, array());
+                        $compoundEntries[] = array(
+                                'category' => 'compound',
+                                'icon' => 'compound',
+                                'name' => $compound->getName(),
+                                'summary' => sprintf('Components: %s.', implode(', ', array_keys($components))),
+                                'description' => $lore['description'],
+                                'statistics' => array(
+                                        'formula' => $compound->getFormula(),
+                                        'components' => $components,
+                                        'classification' => $compound->getClassification(),
+                                        'state' => $compound->getStateAtSTP(),
+                                        'density' => $compound->getDensity(),
+                                        'molar_mass' => $compound->getMolarMass()
+                                ),
+                                'chronicle' => array_slice($lore['chronicle'], -$chronicleLimit),
+                                'children' => array()
+                        );
+                }
+        }
+
+        if (empty($elementEntries) && empty($compoundEntries))
+        {
+                return array();
+        }
+
+        return array(
+                'category' => 'materials',
+                'icon' => 'materials',
+                'name' => 'Material Registry',
+                'summary' => sprintf('%d elements and %d compounds chronicled.', count($elementEntries), count($compoundEntries)),
+                'description' => 'Elements and compounds cataloged for interface explorers.',
+                'statistics' => array(
+                        'elements' => count($elementEntries),
+                        'compounds' => count($compoundEntries)
+                ),
+                'chronicle' => array(
+                        array(
+                                'type' => 'registry',
+                                'text' => 'Material catalog compiled for artisans charting the universe.',
+                                'timestamp' => microtime(true),
+                                'participants' => array()
+                        )
+                ),
+                'children' => array(
+                        array(
+                                'category' => 'element_group',
+                                'icon' => 'elements',
+                                'name' => 'Elements',
+                                'summary' => sprintf('%d foundational elements.', count($elementEntries)),
+                                'description' => 'Atomic identities forged in stellar furnaces.',
+                                'chronicle' => array(),
+                                'children' => $elementEntries
+                        ),
+                        array(
+                                'category' => 'compound_group',
+                                'icon' => 'compounds',
+                                'name' => 'Compounds',
+                                'summary' => sprintf('%d bonded alliances of matter.', count($compoundEntries)),
+                                'description' => 'Molecular architectures birthed from cosmic chemistry.',
+                                'chronicle' => array(),
+                                'children' => $compoundEntries
+                        )
+                )
+        );
 }
 
 ?>

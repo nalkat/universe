@@ -14,6 +14,8 @@ class System
         private $gravitySofteningLength;
         private $eventLog;
         private $eventLogLimit;
+        private $description;
+        private $chronicle;
 
         public function __construct (string $name, ?Star $primaryStar = null)
         {
@@ -26,6 +28,8 @@ class System
                 $this->gravitySofteningLength = floatval(0);
                 $this->eventLog = array();
                 $this->eventLogLimit = 100;
+                $this->description = 'Uncharted system awaiting observational data.';
+                $this->chronicle = array();
                 if ($primaryStar instanceof Star)
                 {
                         $this->setPrimaryStar($primaryStar);
@@ -294,8 +298,8 @@ class System
         {
                 if ($limit === null)
                 {
-                        return $this->eventLog;
-                }
+                return $this->eventLog;
+        }
                 $limit = max(0, intval($limit));
                 if ($limit === 0) return array();
                 return array_slice($this->eventLog, -$limit);
@@ -515,6 +519,75 @@ class System
                 {
                         $this->eventLog = array_slice($this->eventLog, -$this->eventLogLimit);
                 }
+                $summary = isset($event['type']) ? strval($event['type']) : 'event';
+                $participants = array();
+                if (isset($event['objects']) && is_array($event['objects']))
+                {
+                        $participants = $event['objects'];
+                }
+                $objects = empty($participants) ? 'unknown masses' : implode(', ', array_map('strval', $participants));
+                $energy = isset($event['energy']) ? floatval($event['energy']) : 0.0;
+                $speed = isset($event['relative_speed']) ? floatval($event['relative_speed']) : 0.0;
+                $text = sprintf(
+                        '%s event involving %s (energy %.2e J, relative speed %.2f m/s).',
+                        ucfirst($summary),
+                        $objects,
+                        $energy,
+                        $speed
+                );
+                $this->addChronicleEntry($summary, $text, floatval($event['timestamp'] ?? $this->age), $participants);
+        }
+
+        public function setDescription (string $description) : void
+        {
+                $normalized = trim(strval($description));
+                if ($normalized === '') return;
+                $this->description = $normalized;
+        }
+
+        public function getDescription () : string
+        {
+                return $this->description;
+        }
+
+        public function addChronicleEntry (string $type, string $text, ?float $timestamp = null, array $participants = array()) : void
+        {
+                $normalized = trim(strval($text));
+                if ($normalized === '') return;
+                $entry = array(
+                        'type' => Utility::cleanse_string($type === '' ? 'event' : $type),
+                        'text' => $normalized,
+                        'timestamp' => ($timestamp === null) ? $this->age : floatval($timestamp),
+                        'participants' => array_values(array_unique(array_map('strval', $participants)))
+                );
+                $this->chronicle[] = $entry;
+                if (count($this->chronicle) > 64)
+                {
+                        $this->chronicle = array_slice($this->chronicle, -64);
+                }
+        }
+
+        public function importChronicle (array $entries) : void
+        {
+                $this->chronicle = array();
+                foreach ($entries as $entry)
+                {
+                        if (!is_array($entry)) continue;
+                        $this->addChronicleEntry(
+                                strval($entry['type'] ?? 'event'),
+                                strval($entry['text'] ?? ''),
+                                isset($entry['timestamp']) ? floatval($entry['timestamp']) : null,
+                                is_array($entry['participants'] ?? null) ? $entry['participants'] : array()
+                        );
+                }
+        }
+
+        public function getChronicle (?int $limit = null) : array
+        {
+                if ($limit === null) return $this->chronicle;
+                $limit = max(0, intval($limit));
+                if ($limit === 0) return array();
+                return array_slice($this->chronicle, -$limit);
         }
 }
 ?>
