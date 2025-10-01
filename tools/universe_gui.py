@@ -12,6 +12,16 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
+import importlib.util
+import sys
+
+if importlib.util.find_spec("tkinter") is None:
+    sys.stderr.write(
+        "Universe GUI requires the tkinter module. Install Tk support (e.g. python3-tk) "
+        "and retry.\n"
+    )
+    sys.exit(1)
+
 import tkinter as tk
 from tkinter import messagebox, ttk
 

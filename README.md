@@ -107,6 +107,10 @@ The `tools/universe_gui.py` script offers a lightweight Tkinter interface for ru
 python3 tools/universe_gui.py
 ```
 
+> **Prerequisite**
+> The GUI depends on the Python `tkinter` module. Install your platform's Tk bindings
+> (for example `python3-tk` on Debian/Ubuntu) before launching the interface.
+
 Use the "Run Once" mode to execute batch simulations and review the summarized output
 in the integrated log pane, or switch to "Start Daemon" to manage a foreground daemon
 instance with custom socket and PID file paths. The GUI keeps the command history in
