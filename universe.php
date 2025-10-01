@@ -31,6 +31,11 @@ if (!empty($arguments) && !str_starts_with($arguments[0], '--'))
         $rawCommand = array_shift($arguments);
 }
 $options = universe_parse_options($arguments);
+if (array_key_exists('help', $options) || array_key_exists('h', $options))
+{
+        universe_print_usage();
+        exit(0);
+}
 $command = $rawCommand !== null ? UniverseCommand::fromString($rawCommand) : UniverseCommand::Start;
 if ($rawCommand !== null && $command === null)
 {
@@ -939,6 +944,7 @@ function universe_print_usage () : void
         echo "  php universe.php start [--delta=3600] [--interval=1] [--auto-steps=1] [--socket=path] [--pid-file=path] [--no-daemonize]" . PHP_EOL;
         echo "  php universe.php run-once [--steps=10] [--delta=3600] [--tick-delay=0]" . PHP_EOL;
         echo "  php universe.php catalog [--format=json] [--pretty] [--people-limit=50] [--chronicle-limit=12]" . PHP_EOL;
+        echo "  php universe.php --help" . PHP_EOL;
         echo "  php universe.php help" . PHP_EOL;
         echo PHP_EOL . "Generation options:" . PHP_EOL;
         echo "  --seed=<int>                Use a deterministic RNG seed for the generated universe" . PHP_EOL;

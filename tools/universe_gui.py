@@ -15,6 +15,27 @@ from typing import Any, Dict, Iterable, List, Optional
 import importlib.util
 import sys
 
+
+def _print_cli_usage() -> None:
+    script_name = Path(__file__).name
+    sys.stdout.write(
+        "Universe GUI usage:\n"
+        f"  python3 {script_name} [--help]\n\n"
+        "Launch the Tkinter-based desktop control panel for the PHP universe simulator.\n"
+    )
+
+
+def _argv_requests_help(argv: Iterable[str]) -> bool:
+    for argument in argv:
+        if argument in {"-h", "--help"}:
+            return True
+    return False
+
+
+if _argv_requests_help(sys.argv[1:]):
+    _print_cli_usage()
+    sys.exit(0)
+
 if importlib.util.find_spec("tkinter") is None:
     sys.stderr.write(
         "Universe GUI requires the tkinter module. Install Tk support (e.g. python3-tk) "
