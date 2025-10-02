@@ -7,7 +7,9 @@
 - Modeled persistent planetary weather systems that cycle through climate-informed patterns and feed into each world's descriptive text.
 - Wove collaborative citizen backstories using shared country chronicles so every person now references their community and relationships.
 - Documented simulation tasks and readiness goals for hierarchical spawning.
-- Replaced the EnVision dependency with a built-in telemetry module and updated consumers to reference the new metrics container.
+- Replaced the legacy external telemetry dependency with a built-in module and updated consumers to reference the new metrics container.
+- Removed shared-environment and EnVision-era scaffolding so the simulator relies solely on in-repo libraries and runtime paths.
+- Slowed the Tkinter control panel defaults to one-step, one-minute ticks with a built-in delay so catalog exploration no longer races the simulation.
 - Planned improvements for universe simulation orchestration.
 - Implemented hierarchical environment checks and readiness gating for countries and people.
 - Added a reusable UniverseSimulator orchestrator and updated the executable to drive galaxies, systems, and civilizations.

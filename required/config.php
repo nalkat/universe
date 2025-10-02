@@ -1,6 +1,6 @@
 <?php // 7.3.0 - required/config.php
-// check if the shared environment is "installed" 
-if ((getenv('ENV_INSTALLED')) === false) exit ("Shared environment is not detected, please ensure it is configured");
+// This project now runs entirely from its repository without requiring a shared
+// environment bootstrap.
 require_once __DIR__ . "/required/defines.php";
 require_once __DIR__ . "/required/class_preRequisites.php";
 
@@ -38,7 +38,6 @@ foreach (explode(PHP_EOL,$extensions) as $extension)
 // The singular method to add a *required* class:
 PreRequisites::add_class("Logger","/logger/class_logger.php",DEP_REQUIRED);
 // The singular method to add an *optional* extension:
-PreRequisites::add_class("db","/db/class_db.php",DEP_OPTIONAL);
 
 /* The quicker method:
  * create a list of dependent php classes, 1 per line, as above,

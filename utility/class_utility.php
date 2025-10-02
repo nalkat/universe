@@ -34,7 +34,7 @@ final class Utility
 		self::$Telemetry =& $GLOBALS['Telemetry'];
 		self::$Telemetry->objects_instantiated++;
 		self::$Telemetry->functions_entered++;
-		self::$domain = $_SERVER['SERVER_NAME'] ?? getenv("ENV_HOSTNAME") ?? getenv("HOSTNAME") ?? "the.observer";
+                self::$domain = $_SERVER['SERVER_NAME'] ?? php_uname('n') ?? gethostname() ?? "the.observer";
 		global $accessLog, $consoleLog, $debugLog, $errorLog;
 		if (($accessLog !== null) && (is_a($accessLog,"Logger"))) {
 			self::$aLog =& $accessLog;
@@ -77,58 +77,21 @@ final class Utility
 	}
 
   function counter () : int {
-		if (!class_exists("db")) require_once "class_db.php";
-		global $domain;
-  	try
-	  {
-		  if (!$db = new db ())
-			{
-			  $GLOBALS['Telemetry']->excptions_thrown++;
-			  throw new Exception ("Unable to connect to the database", 0);
-		  }
-		/*
-	    if (!($escDomain = $db->escapeLiteral($domain))===false)
-			{
-					$db->sqlstr = "INSERT INTO page_hits (domain_id, page_hits) values ((select id from domains where name='". $domain ."'), 1) ON CONFLICT (domain_id) DO UPDATE SET page_hits = page_hits.page_hits + 1 RETURNING page_hits.page_hits;";
-		}
-			else
-			{
-				return (0);
-			}
-		*/
-      if (($escDomain = $db->escapeLiteral($domain)) !== false)
-      {
-        $db->sqlstr = "
-          WITH domain_lookup AS (
-            SELECT id FROM domains WHERE name = {$escDomain}
-          )
-          INSERT INTO page_hits (domain_id, page_hits)
-          SELECT id, 1 FROM domain_lookup
-          ON CONFLICT (domain_id)
-          DO UPDATE SET page_hits = page_hits.page_hits + 1
-          RETURNING page_hits;
-        ";
-      }
-      else
-      {
-  			echo "<p>$domain</p>" . PHP_EOL;
-        return 0;
-      }
-
-  		if (!$db->query())
-  		{
-  			$GLOBALS['Telemetry']->exceptions_thrown++;
-  			throw new Exception ("Unable to query the database (".$db->sqlstr.")",0);
-  		}
-  		return ($db->row()['page_hits']);
-  	}
-  	catch (Exception $e)
-  	{
-  		$GLOBALS['Telemetry']->exceptions_caught++;
-  		$GLOBALS['Telemetry']->exceptions_last_message = $e->getMessage();
-  		$GLOBALS['Telemetry']->exceptions_last_code = $e->getCode();
-  		return ($e->getCode());
-  	}
+                global $domain;
+        try
+          {
+                  // Database tracking has been retired for the standalone simulator
+                  // build. Return a constant to preserve the legacy signature without
+                  // requiring external services.
+                  return 0;
+        }
+        catch (Exception $e)
+        {
+                $GLOBALS['Telemetry']->exceptions_caught++;
+                $GLOBALS['Telemetry']->exceptions_last_message = $e->getMessage();
+                $GLOBALS['Telemetry']->exceptions_last_code = $e->getCode();
+                return ($e->getCode());
+        }
   }
 	public static function isMTU (int $mtu) : bool
 	{

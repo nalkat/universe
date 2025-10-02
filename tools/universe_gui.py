@@ -75,9 +75,9 @@ class UniverseGUI(tk.Tk):
         self.project_root = Path(__file__).resolve().parents[1]
         self.php_binary = tk.StringVar(value="php")
         self.mode = tk.StringVar(value="run_once")
-        self.steps = tk.StringVar(value="10")
-        self.delta = tk.StringVar(value="3600")
-        self.loop_interval = tk.StringVar(value="1.0")
+        self.steps = tk.StringVar(value="1")
+        self.delta = tk.StringVar(value="60")
+        self.loop_interval = tk.StringVar(value="2.0")
         self.auto_steps = tk.StringVar(value="1")
         self.socket_path = tk.StringVar(value=str(self.project_root / "runtime" / "universe.sock"))
         self.pid_file_path = tk.StringVar(value=str(self.project_root / "runtime" / "universe.pid"))
@@ -86,7 +86,7 @@ class UniverseGUI(tk.Tk):
         self.galaxies = tk.StringVar()
         self.systems_per_galaxy = tk.StringVar()
         self.planets_per_system = tk.StringVar()
-        self.tick_delay = tk.StringVar(value="0.0")
+        self.tick_delay = tk.StringVar(value="2.0")
         self.catalog_refresh_seconds = tk.DoubleVar(value=10.0)
         self.auto_refresh = tk.BooleanVar(value=False)
 
