@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import queue
+import signal
 import subprocess
 import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import importlib.util
 import sys
@@ -89,17 +91,24 @@ class UniverseGUI(tk.Tk):
         self.tick_delay = tk.StringVar(value="2.0")
         self.catalog_refresh_seconds = tk.DoubleVar(value=10.0)
         self.auto_refresh = tk.BooleanVar(value=False)
+        self.pause_button_text = tk.StringVar(value="Pause")
+        self.status_text = tk.StringVar(value="Idle")
+        self.catalog_search = tk.StringVar()
 
         self.catalog_data: Dict[str, Any] = {}
         self._catalog_index: Dict[str, Dict[str, Any]] = {}
         self._catalog_refresh_job: int | None = None
+        self._status_reset_job: int | None = None
 
         self._output_queue: "queue.Queue[str]" = queue.Queue()
         self._worker: threading.Thread | None = None
+        self._process: subprocess.Popen[str] | None = None
+        self._paused: bool = False
 
         self._build_layout()
         # Ensure refresh label reflects the default DoubleVar value on startup.
         self._update_refresh_label(str(self.catalog_refresh_seconds.get()))
+        self._update_status("Idle")
 
     def _build_layout(self) -> None:
         """Construct widgets."""
@@ -160,7 +169,18 @@ class UniverseGUI(tk.Tk):
 
         button_frame = ttk.Frame(self)
         button_frame.pack(side=tk.TOP, fill=tk.X, padx=12, pady=(0, 12))
-        ttk.Button(button_frame, text="Run", command=self.run_command).pack(side=tk.LEFT)
+        self.run_button = ttk.Button(button_frame, text="Run", command=self.run_command)
+        self.run_button.pack(side=tk.LEFT)
+        self.pause_button = ttk.Button(
+            button_frame,
+            textvariable=self.pause_button_text,
+            command=self.toggle_pause,
+            state=tk.DISABLED,
+        )
+        self.pause_button.pack(side=tk.LEFT, padx=(8, 0))
+        self.stop_button = ttk.Button(button_frame, text="Stop", command=self.stop_command, state=tk.DISABLED)
+        self.stop_button.pack(side=tk.LEFT, padx=(8, 0))
+        ttk.Button(button_frame, text="Reset", command=self.reset_interface).pack(side=tk.LEFT, padx=(8, 0))
         ttk.Button(button_frame, text="Clear Output", command=self.clear_output).pack(side=tk.LEFT, padx=(8, 0))
         ttk.Button(button_frame, text="Load Catalog", command=self.load_catalog).pack(side=tk.LEFT, padx=(24, 0))
 
@@ -183,6 +203,15 @@ class UniverseGUI(tk.Tk):
         self.notebook.add(catalog_tab, text="Universe Browser")
         self._build_catalog_tab(catalog_tab)
 
+        status_frame = ttk.Frame(self)
+        status_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=12, pady=(0, 8))
+        ttk.Separator(status_frame, orient=tk.HORIZONTAL).pack(side=tk.TOP, fill=tk.X, pady=(0, 6))
+        indicator = ttk.Frame(status_frame)
+        indicator.pack(side=tk.TOP, fill=tk.X)
+        ttk.Label(indicator, text="Status:").pack(side=tk.LEFT)
+        self.status_label = ttk.Label(indicator, textvariable=self.status_text)
+        self.status_label.pack(side=tk.LEFT, padx=(6, 0))
+
     def clear_output(self) -> None:
         self.output_text.configure(state=tk.NORMAL)
         self.output_text.delete("1.0", tk.END)
@@ -198,9 +227,122 @@ class UniverseGUI(tk.Tk):
             return
 
         self._append_output("$ " + " ".join(command) + "\n")
+        self._update_status("Running")
         self._worker = threading.Thread(target=self._execute_command, args=(command,), daemon=True)
         self._worker.start()
+        self._set_control_states(True)
         self.after(100, self._drain_queue)
+
+    def toggle_pause(self) -> None:
+        process = self._process
+        if process is None or process.poll() is not None:
+            return
+        if not hasattr(signal, "SIGSTOP") or os.name == "nt":
+            messagebox.showinfo(
+                "Universe Simulator",
+                "Pause and resume are only available on Unix-like systems.",
+            )
+            return
+        try:
+            if self._paused:
+                os.kill(process.pid, signal.SIGCONT)
+                self._paused = False
+                self.pause_button_text.set("Pause")
+                self._append_output("[process resumed]\n")
+                self._update_status("Running")
+            else:
+                os.kill(process.pid, signal.SIGSTOP)
+                self._paused = True
+                self.pause_button_text.set("Resume")
+                self._append_output("[process paused]\n")
+                self._update_status("Paused")
+        except OSError as exc:
+            messagebox.showerror("Universe Simulator", f"Unable to toggle pause: {exc}")
+
+    def stop_command(self) -> None:
+        process = self._process
+        if process is None:
+            self._update_status("Idle")
+            return
+        if process.poll() is None:
+            self._append_output("[stopping process]\n")
+            self._update_status("Stopping")
+            try:
+                process.terminate()
+                process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                process.kill()
+            except OSError as exc:
+                self._append_output(f"Failed to stop process: {exc}\n")
+        self._process = None
+        self._paused = False
+        self.pause_button_text.set("Pause")
+        self._set_control_states(False)
+
+    def reset_interface(self) -> None:
+        process = self._process
+        if process is not None and process.poll() is None:
+            self.stop_command()
+            # Give the worker loop a moment to emit its exit notice before clearing.
+            self.after(50, self.reset_interface)
+            return
+
+        self.mode.set("run_once")
+        self.steps.set("1")
+        self.delta.set("60")
+        self.loop_interval.set("2.0")
+        self.auto_steps.set("1")
+        self.tick_delay.set("2.0")
+        self.seed.set("")
+        self.galaxies.set("")
+        self.systems_per_galaxy.set("")
+        self.planets_per_system.set("")
+        self.php_binary.set("php")
+        self.socket_path.set(str(self.project_root / "runtime" / "universe.sock"))
+        self.pid_file_path.set(str(self.project_root / "runtime" / "universe.pid"))
+        self.foreground.set(True)
+        self.catalog_refresh_seconds.set(10.0)
+        if hasattr(self, "refresh_scale"):
+            self.refresh_scale.set(10.0)
+        self._update_refresh_label(str(self.catalog_refresh_seconds.get()))
+        self.auto_refresh.set(False)
+        self._cancel_catalog_refresh()
+        self.catalog_data = {}
+        self._catalog_index.clear()
+        self.catalog_search.set("")
+        if hasattr(self, "catalog_tree"):
+            for item in self.catalog_tree.get_children():
+                self.catalog_tree.delete(item)
+        if hasattr(self, "catalog_details"):
+            self.catalog_details.configure(state=tk.NORMAL)
+            self.catalog_details.delete("1.0", tk.END)
+            self.catalog_details.configure(state=tk.DISABLED)
+        if hasattr(self, "visual_canvas"):
+            self.visual_canvas.delete("all")
+        self.clear_output()
+        self._set_control_states(False)
+        self._update_status("Idle")
+
+    def _set_control_states(self, running: bool) -> None:
+        if running:
+            self.pause_button_text.set("Pause")
+            self.pause_button.configure(state=tk.NORMAL)
+            self.stop_button.configure(state=tk.NORMAL)
+        else:
+            self.pause_button_text.set("Pause")
+            self.pause_button.configure(state=tk.DISABLED)
+            self.stop_button.configure(state=tk.DISABLED)
+            self._paused = False
+
+    def _on_process_exit(self, _return_code: int) -> None:
+        self._worker = None
+        self._process = None
+        self._paused = False
+        self._set_control_states(False)
+        if _return_code == 0:
+            self._update_status("Completed", auto_reset=True)
+        else:
+            self._update_status(f"Error ({_return_code})")
 
     def _build_command(self) -> List[str] | None:
         binary = self.php_binary.get().strip() or "php"
@@ -255,13 +397,18 @@ class UniverseGUI(tk.Tk):
             )
         except OSError as exc:
             self._output_queue.put(f"Failed to start command: {exc}\n")
+            self._output_queue.put(("__STATUS__", "Error starting command", True))
+            self._output_queue.put(("__EXIT__", 1))
             return
 
+        self._process = process
+        self._paused = False
         assert process.stdout is not None
         for line in process.stdout:
             self._output_queue.put(line)
         return_code = process.wait()
         self._output_queue.put(f"\n[process exited with code {return_code}]\n")
+        self._output_queue.put(("__EXIT__", return_code))
 
     def _append_output(self, text: str) -> None:
         self.output_text.configure(state=tk.NORMAL)
@@ -272,10 +419,25 @@ class UniverseGUI(tk.Tk):
     def _drain_queue(self) -> None:
         while True:
             try:
-                text = self._output_queue.get_nowait()
+                item = self._output_queue.get_nowait()
             except queue.Empty:
                 break
-            self._append_output(text)
+            if isinstance(item, tuple) and item:
+                tag = item[0]
+                if tag == "__EXIT__":
+                    try:
+                        code = int(item[1])
+                    except (IndexError, ValueError, TypeError):
+                        code = 0
+                    self._on_process_exit(code)
+                    continue
+                if tag == "__STATUS__":
+                    message = str(item[1]) if len(item) > 1 else ""
+                    auto_reset = bool(item[2]) if len(item) > 2 else False
+                    if message:
+                        self._update_status(message, auto_reset=auto_reset)
+                    continue
+            self._append_output(str(item))
         if self._worker is not None and self._worker.is_alive():
             self.after(100, self._drain_queue)
 
@@ -412,10 +574,17 @@ class UniverseGUI(tk.Tk):
         control = ttk.Frame(parent)
         control.pack(side=tk.TOP, fill=tk.X, padx=12, pady=12)
 
-        ttk.Checkbutton(control, text="Auto-refresh", variable=self.auto_refresh, command=self._auto_refresh_toggle).pack(side=tk.LEFT)
-        ttk.Label(control, text="Interval (s):").pack(side=tk.LEFT, padx=(12, 6))
+        refresh_frame = ttk.Frame(control)
+        refresh_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Checkbutton(
+            refresh_frame,
+            text="Auto-refresh",
+            variable=self.auto_refresh,
+            command=self._auto_refresh_toggle,
+        ).pack(side=tk.LEFT)
+        ttk.Label(refresh_frame, text="Interval (s):").pack(side=tk.LEFT, padx=(12, 6))
         self.refresh_scale = ttk.Scale(
-            control,
+            refresh_frame,
             from_=2.0,
             to=120.0,
             orient=tk.HORIZONTAL,
@@ -423,8 +592,17 @@ class UniverseGUI(tk.Tk):
             command=self._update_refresh_label,
         )
         self.refresh_scale.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        self.refresh_value_label = ttk.Label(control, text=f"{self.catalog_refresh_seconds.get():.1f}s")
+        self.refresh_value_label = ttk.Label(refresh_frame, text=f"{self.catalog_refresh_seconds.get():.1f}s")
         self.refresh_value_label.pack(side=tk.LEFT, padx=(6, 0))
+
+        search_frame = ttk.Frame(control)
+        search_frame.pack(side=tk.RIGHT)
+        ttk.Label(search_frame, text="Search:").pack(side=tk.LEFT, padx=(0, 6))
+        search_entry = ttk.Entry(search_frame, textvariable=self.catalog_search, width=24)
+        search_entry.pack(side=tk.LEFT)
+        search_entry.bind("<Return>", self._perform_catalog_search)
+        ttk.Button(search_frame, text="Find", command=self._perform_catalog_search).pack(side=tk.LEFT, padx=(6, 0))
+        ttk.Button(search_frame, text="Clear", command=self._clear_catalog_search).pack(side=tk.LEFT, padx=(6, 0))
 
         paned = ttk.PanedWindow(parent, orient=tk.HORIZONTAL)
         paned.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=12, pady=(0, 12))
@@ -497,6 +675,8 @@ class UniverseGUI(tk.Tk):
         self.catalog_tree.item(root_id, open=True)
         self.catalog_tree.selection_set(root_id)
         self._display_catalog_details(data)
+        if self.catalog_search.get().strip():
+            self._perform_catalog_search()
 
     def _insert_catalog_node(self, parent: str, node: Dict[str, Any]) -> str:
         name = str(node.get("name", "Unnamed"))
@@ -507,6 +687,55 @@ class UniverseGUI(tk.Tk):
             if isinstance(child, dict):
                 self._insert_catalog_node(item_id, child)
         return item_id
+
+    def _perform_catalog_search(self, _event: object | None = None) -> None:
+        if not hasattr(self, "catalog_tree"):
+            return
+        query = self.catalog_search.get().strip().lower()
+        if not query:
+            return
+        for item_id, node in self._catalog_index.items():
+            name = str(node.get("name", "")).lower()
+            summary = str(node.get("summary", "")).lower()
+            if query in name or (summary and query in summary):
+                self.catalog_tree.see(item_id)
+                self.catalog_tree.selection_set(item_id)
+                self.catalog_tree.focus(item_id)
+                return
+        messagebox.showinfo("Universe Browser", f"No catalog entries matching '{self.catalog_search.get()}'.")
+
+    def _clear_catalog_search(self) -> None:
+        self.catalog_search.set("")
+        if hasattr(self, "catalog_tree"):
+            selection = self.catalog_tree.selection()
+            if selection:
+                self.catalog_tree.see(selection[0])
+
+    def _update_status(self, text: str, *, auto_reset: bool = False) -> None:
+        self.status_text.set(text)
+        tone_map = {
+            "idle": "#e0e0e0",
+            "running": "#81c784",
+            "paused": "#ffb74d",
+            "completed": "#64b5f6",
+            "stopping": "#ef9a9a",
+            "error": "#ef5350",
+        }
+        token = text.split(" ", 1)[0].lower() if text else "idle"
+        color = tone_map.get(token, "#e0e0e0")
+        if hasattr(self, "status_label"):
+            self.status_label.configure(foreground=color)
+        self._cancel_status_reset()
+        if auto_reset:
+            self._status_reset_job = self.after(5000, lambda: self._update_status("Idle"))
+
+    def _cancel_status_reset(self) -> None:
+        if self._status_reset_job is not None:
+            try:
+                self.after_cancel(self._status_reset_job)
+            except Exception:
+                pass
+            self._status_reset_job = None
 
     def _on_catalog_select(self, _: object) -> None:
         selection = self.catalog_tree.selection()
@@ -532,7 +761,11 @@ class UniverseGUI(tk.Tk):
             lines.append("")
             lines.append("Statistics:")
             for key, value in stats.items():
-                lines.append(f"  - {key.replace('_', ' ').title()}: {self._format_value(value)}")
+                if key == "life_breakdown" and isinstance(value, dict):
+                    lines.append("  - Life Breakdown:")
+                    lines.extend(self._format_life_breakdown(value))
+                    continue
+                lines.append(f"  - {key.replace('_', ' ').title()}: {self._format_statistic(key, value)}")
 
         chronicle = node.get('chronicle')
         if isinstance(chronicle, list) and chronicle:
@@ -559,6 +792,12 @@ class UniverseGUI(tk.Tk):
             lines.append("")
             lines.append("Metadata:")
             for key, value in metadata.items():
+                if key == "map" and isinstance(value, dict):
+                    lines.append(f"  - Map: {self._summarize_map_metadata(value)}")
+                    continue
+                if key == "territory" and isinstance(value, dict):
+                    lines.append(f"  - Territory: {self._summarize_territory(value)}")
+                    continue
                 lines.append(f"  - {key.replace('_', ' ').title()}: {self._format_value(value)}")
 
         self.catalog_details.configure(state=tk.NORMAL)
@@ -574,6 +813,92 @@ class UniverseGUI(tk.Tk):
                 return text[:797] + "..."
             return text
         return str(value)
+
+    def _format_statistic(self, key: str, value: Any) -> str:
+        if isinstance(value, (int, float)):
+            if abs(value - int(value)) < 1e-6:
+                return f"{int(value):,}"
+            return f"{value:,.2f}"
+        return self._format_value(value)
+
+    def _format_life_breakdown(self, breakdown: Dict[str, Any]) -> List[str]:
+        lines: List[str] = []
+        kingdoms = breakdown.get("kingdoms")
+        if isinstance(kingdoms, dict) and kingdoms:
+            lines.append("    Kingdoms:")
+            for name, percent in list(kingdoms.items())[:5]:
+                try:
+                    pct = float(percent)
+                except (TypeError, ValueError):
+                    pct = 0.0
+                lines.append(f"      • {name}: {pct:.2f}%")
+        phyla = breakdown.get("phyla")
+        if isinstance(phyla, dict) and phyla:
+            lines.append("    Phyla:")
+            for name, percent in list(phyla.items())[:5]:
+                try:
+                    pct = float(percent)
+                except (TypeError, ValueError):
+                    pct = 0.0
+                lines.append(f"      • {name}: {pct:.2f}%")
+        entries = breakdown.get("entries")
+        if isinstance(entries, list) and entries and len(lines) < 2:
+            for entry in entries[:5]:
+                if not isinstance(entry, dict):
+                    continue
+                kingdom = entry.get('kingdom', 'Unknown')
+                phylum = entry.get('phylum', 'Unclassified')
+                try:
+                    pct = float(entry.get('share', 0.0))
+                except (TypeError, ValueError):
+                    pct = 0.0
+                lines.append(f"      • {kingdom} / {phylum}: {pct:.2f}%")
+        return lines or ["    (no biosphere data)"]
+
+    def _summarize_map_metadata(self, map_data: Dict[str, Any]) -> str:
+        parts: List[str] = []
+        countries = map_data.get('countries')
+        cities = map_data.get('cities')
+        residents = map_data.get('residents')
+        if isinstance(countries, list):
+            parts.append(f"{len(countries)} countries")
+        if isinstance(cities, list):
+            parts.append(f"{len(cities)} cities")
+        if isinstance(residents, list):
+            parts.append(f"{len(residents)} residents plotted")
+        if 'coordinates' in map_data and not parts:
+            coords = map_data.get('coordinates') or {}
+            lat = float(coords.get('latitude', 0.0))
+            lon = float(coords.get('longitude', coords.get('lon', 0.0)))
+            parts.append(f"center at {lat:.1f}°, {lon:.1f}°")
+        return ", ".join(parts) if parts else "available"
+
+    def _summarize_territory(self, territory: Dict[str, Any]) -> str:
+        center = territory.get('center') or {}
+        span = territory.get('span') or {}
+        try:
+            lat = float(center.get('latitude', center.get('lat', 0.0)))
+            lon = float(center.get('longitude', center.get('lon', 0.0)))
+        except (TypeError, ValueError):
+            lat = 0.0
+            lon = 0.0
+        try:
+            lat_span = float(span.get('latitude', 0.0))
+            lon_span = float(span.get('longitude', 0.0))
+        except (TypeError, ValueError):
+            lat_span = 0.0
+            lon_span = 0.0
+        biome = territory.get('biome')
+        terrain = territory.get('terrain')
+        descriptor = f"center=({lat:.1f}°, {lon:.1f}°), span≈({lat_span:.1f}°, {lon_span:.1f}°)"
+        if biome or terrain:
+            extras = []
+            if biome:
+                extras.append(str(biome))
+            if terrain:
+                extras.append(str(terrain))
+            descriptor += f" | {'; '.join(extras)}"
+        return descriptor
 
     def _render_visual(self, node: Dict[str, Any]) -> None:
         if not hasattr(self, "visual_canvas"):
@@ -606,6 +931,7 @@ class UniverseGUI(tk.Tk):
             'star': '#fdd663',
             'planet': '#8ab4f8',
             'country': '#a5d6a7',
+            'city': '#f48fb1',
             'person': '#ffab91',
             'materials': '#c5e1a5',
             'element': '#81d4fa',
@@ -614,6 +940,7 @@ class UniverseGUI(tk.Tk):
         color = color_map.get(category, '#e0e0e0')
         cx, cy = width // 2, height // 2
         radius = min(width, height) // 3
+        metadata = node.get('metadata') if isinstance(node.get('metadata'), dict) else {}
 
         if category == 'galaxy':
             for arm in range(3):
@@ -641,20 +968,48 @@ class UniverseGUI(tk.Tk):
             elif 'volcanic' in classification:
                 color = '#ff8a65'
             canvas.create_oval(cx - radius, cy - radius, cx + radius, cy + radius, fill=color, outline="")
+            breakdown = node.get('statistics', {}).get('life_breakdown')
+            if isinstance(breakdown, dict):
+                kingdoms = breakdown.get('kingdoms')
+                if isinstance(kingdoms, dict) and kingdoms:
+                    y_offset = 20
+                    canvas.create_text(
+                        width - 10,
+                        y_offset,
+                        anchor=tk.NE,
+                        text="Dominant Kingdoms",
+                        fill="#e0f7fa",
+                        font=("TkDefaultFont", 10, "bold"),
+                    )
+                    for name, percent in list(kingdoms.items())[:4]:
+                        try:
+                            pct = float(percent)
+                        except (TypeError, ValueError):
+                            pct = 0.0
+                        y_offset += 16
+                        canvas.create_text(
+                            width - 10,
+                            y_offset,
+                            anchor=tk.NE,
+                            text=f"{name}: {pct:.1f}%",
+                            fill="#e0f7fa",
+                        )
+            net_worth = node.get('statistics', {}).get('net_worth')
+            if isinstance(net_worth, (int, float)):
+                canvas.create_text(
+                    width // 2,
+                    height - 20,
+                    text=f"Net worth: {net_worth:,.0f}",
+                    fill="#ffe082",
+                )
         elif category == 'star':
             canvas.create_oval(cx - radius, cy - radius, cx + radius, cy + radius, fill=color, outline="")
         elif category == 'country':
-            size = radius
-            points = [
-                cx, cy - size,
-                cx + size, cy,
-                cx, cy + size,
-                cx - size, cy,
-            ]
-            canvas.create_polygon(points, fill=color, outline="#2e7d32", width=2)
+            self._draw_country_map(canvas, metadata, width, height)
+        elif category == 'city':
+            self._draw_city_map(canvas, metadata, width, height)
         elif category == 'person':
-            canvas.create_oval(cx - radius // 2, cy - radius, cx + radius // 2, cy - radius // 2, fill=color, outline="")
-            canvas.create_rectangle(cx - radius // 3, cy - radius // 2, cx + radius // 3, cy + radius // 2, fill=color, outline="")
+            self._draw_person_marker(canvas, node, width, height, color)
         elif category in {'materials', 'element_group', 'elements'}:
             canvas.create_polygon(
                 cx, cy - radius,
@@ -676,6 +1031,115 @@ class UniverseGUI(tk.Tk):
             canvas.create_oval(cx - 12, cy - 12, cx + 12, cy + 12, fill="#ff7043", outline="")
         else:
             canvas.create_oval(cx - radius, cy - radius, cx + radius, cy + radius, fill=color, outline="")
+
+
+
+    def _latlon_to_canvas(self, latitude: float, longitude: float, width: int, height: int) -> Tuple[float, float]:
+        x = (longitude + 180.0) / 360.0 * width
+        y = height - ((latitude + 90.0) / 180.0 * height)
+        return x, y
+
+    def _draw_country_map(self, canvas: tk.Canvas, metadata: Dict[str, Any], width: int, height: int) -> None:
+        territory = metadata.get('territory') if isinstance(metadata, dict) else None
+        if isinstance(territory, dict):
+            center = territory.get('center') or {}
+            span = territory.get('span') or {}
+            try:
+                lat = float(center.get('latitude', center.get('lat', 0.0)))
+                lon = float(center.get('longitude', center.get('lon', 0.0)))
+                lat_span = float(span.get('latitude', 0.0))
+                lon_span = float(span.get('longitude', 0.0))
+            except (TypeError, ValueError):
+                lat = lon = lat_span = lon_span = 0.0
+            top_lat = lat + (lat_span / 2.0)
+            bottom_lat = lat - (lat_span / 2.0)
+            left_lon = lon - (lon_span / 2.0)
+            right_lon = lon + (lon_span / 2.0)
+            x1, y1 = self._latlon_to_canvas(top_lat, left_lon, width, height)
+            x2, y2 = self._latlon_to_canvas(bottom_lat, right_lon, width, height)
+            canvas.create_rectangle(x1, y1, x2, y2, outline="#64ffda", width=2)
+
+        city_markers = metadata.get('map', {}).get('cities') if isinstance(metadata, dict) else None
+        if isinstance(city_markers, list):
+            for city in city_markers:
+                if not isinstance(city, dict):
+                    continue
+                coords = city.get('coordinates') or {}
+                try:
+                    lat = float(coords.get('latitude', coords.get('lat', 0.0)))
+                    lon = float(coords.get('longitude', coords.get('lon', 0.0)))
+                except (TypeError, ValueError):
+                    continue
+                x, y = self._latlon_to_canvas(lat, lon, width, height)
+                canvas.create_oval(x - 4, y - 4, x + 4, y + 4, fill="#ffab91", outline="")
+                name = str(city.get('name', ''))
+                if name:
+                    canvas.create_text(x + 6, y, text=name[:24], anchor=tk.W, fill="#f8bbd0")
+
+    def _draw_city_map(self, canvas: tk.Canvas, metadata: Dict[str, Any], width: int, height: int) -> None:
+        if not isinstance(metadata, dict):
+            return
+        map_data = metadata.get('map')
+        if not isinstance(map_data, dict):
+            return
+        coords = map_data.get('coordinates') or {}
+        try:
+            lat = float(coords.get('latitude', coords.get('lat', 0.0)))
+            lon = float(coords.get('longitude', coords.get('lon', 0.0)))
+        except (TypeError, ValueError):
+            lat = lon = 0.0
+        try:
+            radius_deg = float(map_data.get('radius', 10.0))
+        except (TypeError, ValueError):
+            radius_deg = 10.0
+        center_x, center_y = self._latlon_to_canvas(lat, lon, width, height)
+        pixel_radius = max(12.0, min(width, height) * min(0.45, abs(radius_deg) / 80.0))
+        canvas.create_oval(
+            center_x - pixel_radius,
+            center_y - pixel_radius,
+            center_x + pixel_radius,
+            center_y + pixel_radius,
+            outline="#64b5f6",
+            width=2,
+            fill="#102027",
+        )
+        residents = map_data.get('residents')
+        if isinstance(residents, list):
+            scale = pixel_radius / max(1.0, abs(radius_deg))
+            for resident in residents[:200]:
+                if not isinstance(resident, dict):
+                    continue
+                rcoords = resident.get('coordinates') or {}
+                try:
+                    rlat = float(rcoords.get('latitude', rcoords.get('lat', 0.0)))
+                    rlon = float(rcoords.get('longitude', rcoords.get('lon', 0.0)))
+                except (TypeError, ValueError):
+                    continue
+                rx = center_x + (rlon - lon) * scale
+                ry = center_y - (rlat - lat) * scale
+                canvas.create_oval(rx - 2, ry - 2, rx + 2, ry + 2, fill="#ffeb3b", outline="")
+        canvas.create_oval(center_x - 4, center_y - 4, center_x + 4, center_y + 4, fill="#82b1ff", outline="")
+
+    def _draw_person_marker(self, canvas: tk.Canvas, node: Dict[str, Any], width: int, height: int, color: str) -> None:
+        stats = node.get('statistics') if isinstance(node.get('statistics'), dict) else {}
+        coords = stats.get('coordinates') if isinstance(stats, dict) else None
+        if isinstance(coords, dict):
+            try:
+                lat = float(coords.get('latitude', coords.get('lat', 0.0)))
+                lon = float(coords.get('longitude', coords.get('lon', 0.0)))
+            except (TypeError, ValueError):
+                lat = lon = 0.0
+            x, y = self._latlon_to_canvas(lat, lon, width, height)
+            canvas.create_oval(x - 6, y - 6, x + 6, y + 6, outline=color, width=2)
+            canvas.create_oval(x - 2, y - 2, x + 2, y + 2, fill=color, outline="")
+            name = node.get('name', '')
+            if name:
+                canvas.create_text(x, y - 12, text=str(name)[:32], fill=color)
+        else:
+            cx, cy = width // 2, height // 2
+            radius = min(width, height) // 3
+            canvas.create_oval(cx - radius // 2, cy - radius, cx + radius // 2, cy - radius // 2, fill=color, outline="")
+            canvas.create_rectangle(cx - radius // 3, cy - radius // 2, cx + radius // 3, cy + radius // 2, fill=color, outline="")
 
 
 

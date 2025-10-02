@@ -116,6 +116,27 @@ in the integrated log pane, or switch to "Start Daemon" to manage a foreground d
 instance with custom socket and PID file paths. The GUI keeps the command history in
 view so operators can iterate quickly while we work toward a fully art-directed theme.
 
+### Exploration features
+
+- **Simulation controls** – Dedicated Pause/Resume, Stop, and Reset buttons accompany the
+  Run action so long-running or runaway simulations can be suspended, terminated, or
+  cleared without leaving the interface. A persistent status indicator shows when
+  commands are running, paused, completed, or stopping so operators always know the
+  simulator's state at a glance.
+- **Hierarchical atlas** – The Universe Browser tab renders galaxies, systems, planets,
+  countries, cities, and citizens with chronicle excerpts, net-worth summaries, and
+  planetary life breakdowns grouped by kingdom and phylum for rapid triage.
+- **Map overlays** – Country selections now sketch territorial bounds and city markers
+  on the canvas, city views render a local population map with individual resident dots,
+  and person entries highlight their coordinates on the global projection when location
+  data is available.
+- **Economic telemetry** – Planet, country, and person panels surface aggregate net
+  worth, per-capita wealth, and other ledger details so you can spot thriving or
+  struggling communities at a glance.
+- **Catalog search** – A search box filters the hierarchy by name or summary, helping you
+  jump directly to the systems, planets, or citizens you're interested in without
+  manually expanding each branch.
+
 ## Matter and ecology scaffolding
 
 The simulator now includes foundational classes for cataloguing matter and living habitats:

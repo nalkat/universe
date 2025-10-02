@@ -1,6 +1,9 @@
 # Change Log
 
 ## [Unreleased]
+- Added pause/resume/stop controls, a persistent status indicator, and a reset workflow to the Tkinter control panel so operators can manage and monitor long-running simulations without leaving the GUI.
+- Added catalog search tooling alongside country territory overlays, city population maps, resident dots, and planetary life breakdown summaries grouped by kingdom and phylum.
+- Surfaced per-planet, per-country, and per-person net-worth metrics and coordinate metadata throughout the catalog to anchor upcoming economic visualizations.
 - Added per-planet timekeeping profiles with local day/year lengths and relative flow rates, surfaced via planet descriptions and simulator snapshots.
 - Rebased country and citizen simulation to local planetary time so hunger, recovery, and aging honor each world's cadence and expose life expectancy in local years.
 - Added narrative descriptions to celestial bodies and settlements to support richer UI labeling, including dynamic star, planet, and country summaries.

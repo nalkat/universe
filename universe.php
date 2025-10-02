@@ -1253,7 +1253,9 @@ function universe_catalog_planet (Planet $planet, int $chronicleLimit, int $peop
                         'population' => $summary['population'] ?? 0,
                         'country_count' => count($countries),
                         'environment' => $planet->getEnvironmentSnapshot(),
-                        'timekeeping' => $planet->getTimekeepingProfile()
+                        'timekeeping' => $planet->getTimekeepingProfile(),
+                        'net_worth' => $summary['net_worth'] ?? $planet->getNetWorth(),
+                        'life_breakdown' => $summary['biosphere'] ?? $planet->getBiosphereComposition()
                 ),
                 'chronicle' => array_slice($chronicle, -$chronicleLimit),
                 'children' => $countries,
@@ -1261,9 +1263,43 @@ function universe_catalog_planet (Planet $planet, int $chronicleLimit, int $peop
                         'weather' => array(
                                 'current' => $planet->getCurrentWeather(),
                                 'history' => array_slice($planet->getWeatherHistory($chronicleLimit), 0, $chronicleLimit)
-                        )
+                        ),
+                        'map' => $planet->getMapOverview($peopleLimit)
                 )
         );
+}
+
+function universe_allocate_city_quota (int $globalLimit, int $remaining, int $totalResidents, int $cityPopulation, int $cityCount, int $index) : int
+{
+        if ($globalLimit <= 0 || $remaining <= 0 || $cityCount <= 0)
+        {
+                return 0;
+        }
+        if ($totalResidents <= 0)
+        {
+                if ($index === $cityCount - 1)
+                {
+                        return $remaining;
+                }
+                $perCity = intval(floor($globalLimit / $cityCount));
+                return max(0, min($remaining, max(1, $perCity)));
+        }
+        if ($cityPopulation <= 0)
+        {
+                if ($index === $cityCount - 1)
+                {
+                        return $remaining;
+                }
+                return max(0, min($remaining, max(1, intval($globalLimit / max(1, $cityCount)))));
+        }
+        $share = intval(round(($cityPopulation / max(1, $totalResidents)) * $globalLimit));
+        $share = max(1, $share);
+        $share = min($share, $remaining);
+        if ($index === $cityCount - 1)
+        {
+                $share = $remaining;
+        }
+        return $share;
 }
 
 function universe_catalog_country (Country $country, int $chronicleLimit, int $peopleLimit, array &$totals) : array
@@ -1271,26 +1307,46 @@ function universe_catalog_country (Country $country, int $chronicleLimit, int $p
         $totals['countries']++;
         $totals['population'] += $country->getPopulation();
         $people = $country->getPeople();
-        $children = array();
-        if ($peopleLimit > 0)
+        $cities = $country->getCities();
+        $cityNodes = array();
+        $totalResidents = count($people);
+        $remaining = ($peopleLimit > 0) ? $peopleLimit : 0;
+        $cityCount = count($cities);
+        foreach ($cities as $index => $city)
         {
-                $selected = array_slice($people, 0, $peopleLimit);
-        }
-        else
-        {
-                $selected = array();
-        }
-        foreach ($selected as $person)
-        {
-                if (!($person instanceof Person)) continue;
-                $children[] = universe_catalog_person($person, $chronicleLimit);
+                if (!($city instanceof City)) continue;
+                $cityPopulation = max(0, $city->getPopulation());
+                $allocation = ($peopleLimit > 0)
+                        ? universe_allocate_city_quota($peopleLimit, $remaining, $totalResidents, $cityPopulation, $cityCount, $index)
+                        : 0;
+                if ($peopleLimit > 0)
+                {
+                        $remaining = max(0, $remaining - $allocation);
+                }
+                $cityNodes[] = universe_catalog_city($city, $country, $chronicleLimit, $allocation);
         }
         $chronicle = $country->getChronicle();
         $description = $country->getDescription();
-        $metadata = array('cultural_backdrop' => $country->getCulturalBackdrop());
-        if ($peopleLimit > 0 && count($people) > $peopleLimit)
+        $metadata = array(
+                'cultural_backdrop' => $country->getCulturalBackdrop(),
+                'territory' => $country->getTerritoryProfile(),
+                'map' => array(
+                        'cities' => array_map(function ($city) use ($country) {
+                                if (!($city instanceof City)) return null;
+                                return array(
+                                        'name' => $city->getName(),
+                                        'country' => $country->getName(),
+                                        'coordinates' => $city->getCoordinates(),
+                                        'radius' => $city->getRadius(),
+                                        'population' => $city->getPopulation()
+                                );
+                        }, $cities)
+                )
+        );
+        $metadata['map']['cities'] = array_values(array_filter($metadata['map']['cities']));
+        if ($peopleLimit > 0 && $totalResidents > $peopleLimit)
         {
-                $metadata['omitted_citizens'] = count($people) - $peopleLimit;
+                $metadata['omitted_citizens'] = $totalResidents - $peopleLimit;
         }
         return array(
                 'category' => 'country',
@@ -1301,7 +1357,58 @@ function universe_catalog_country (Country $country, int $chronicleLimit, int $p
                 'statistics' => array(
                         'population' => $country->getPopulation(),
                         'capacity' => $country->getPopulationCapacity(),
-                        'resources' => $country->getResourceReport()
+                        'resources' => $country->getResourceReport(),
+                        'net_worth' => $country->getNetWorth(),
+                        'wealth_per_capita' => $country->getWealthPerCapita()
+                ),
+                'chronicle' => array_slice($chronicle, -$chronicleLimit),
+                'children' => $cityNodes,
+                'metadata' => $metadata
+        );
+}
+
+function universe_catalog_city (City $city, Country $country, int $chronicleLimit, int $peopleLimit) : array
+{
+        $residents = $city->getResidents();
+        $selected = ($peopleLimit > 0) ? array_slice($residents, 0, $peopleLimit) : $residents;
+        $children = array();
+        foreach ($selected as $person)
+        {
+                if (!($person instanceof Person)) continue;
+                $children[] = universe_catalog_person($person, $chronicleLimit);
+        }
+        $chronicle = method_exists($city, 'getChronicle') ? $city->getChronicle($chronicleLimit) : array();
+        $coordinates = $city->getCoordinates();
+        $metadata = array(
+                'map' => array(
+                        'coordinates' => $coordinates,
+                        'radius' => $city->getRadius(),
+                        'residents' => array()
+                )
+        );
+        foreach ($selected as $person)
+        {
+                if (!($person instanceof Person)) continue;
+                $metadata['map']['residents'][] = array(
+                        'name' => $person->getName(),
+                        'coordinates' => $person->getCoordinates() ?? $coordinates,
+                        'net_worth' => $person->getNetWorth()
+                );
+        }
+        if ($peopleLimit > 0 && count($residents) > $peopleLimit)
+        {
+                $metadata['omitted_residents'] = count($residents) - $peopleLimit;
+        }
+        return array(
+                'category' => 'city',
+                'icon' => 'city',
+                'name' => $city->getName(),
+                'summary' => sprintf('Population %d within %s.', $city->getPopulation(), $country->getName()),
+                'description' => sprintf('%s serves as a civic hub for %s.', $city->getName(), $country->getName()),
+                'statistics' => array(
+                        'population' => $city->getPopulation(),
+                        'coordinates' => $coordinates,
+                        'radius' => $city->getRadius()
                 ),
                 'chronicle' => array_slice($chronicle, -$chronicleLimit),
                 'children' => $children,
@@ -1323,8 +1430,15 @@ function universe_catalog_person (Person $person, int $chronicleLimit) : array
                 'icon' => 'person',
                 'name' => $person->getName(),
                 'summary' => ($person->getProfession() === null)
-                        ? sprintf('Citizen of %s.', ($home instanceof Country) ? $home->getName() : 'unknown origins')
-                        : sprintf('%s of %s.', ucfirst($person->getProfession()), ($home instanceof Country) ? $home->getName() : 'unknown origins'),
+                        ? sprintf('Citizen of %s%s.',
+                                ($home instanceof Country) ? $home->getName() : 'unknown origins',
+                                ($person->getResidenceCity() instanceof City) ? ' residing in ' . $person->getResidenceCity()->getName() : ''
+                        )
+                        : sprintf('%s of %s%s.',
+                                ucfirst($person->getProfession()),
+                                ($home instanceof Country) ? $home->getName() : 'unknown origins',
+                                ($person->getResidenceCity() instanceof City) ? ' in ' . $person->getResidenceCity()->getName() : ''
+                        ),
                 'description' => $person->getBackstory(),
                 'statistics' => array(
                         'age_years' => round($person->getAgeInYears(), 2),
@@ -1332,7 +1446,10 @@ function universe_catalog_person (Person $person, int $chronicleLimit) : array
                         'senescence_years' => $person->getSenescenceStartYears(),
                         'mortality_model' => $person->getMortalityModel(),
                         'relationships' => $person->getRelationships(),
-                        'home_country' => ($home instanceof Country) ? $home->getName() : null
+                        'home_country' => ($home instanceof Country) ? $home->getName() : null,
+                        'net_worth' => $person->getNetWorth(),
+                        'coordinates' => $person->getCoordinates(),
+                        'residence_city' => ($person->getResidenceCity() instanceof City) ? $person->getResidenceCity()->getName() : null
                 ),
                 'chronicle' => array_slice($chronicle, -$chronicleLimit),
                 'children' => array()

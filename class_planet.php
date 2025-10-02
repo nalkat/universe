@@ -18,6 +18,7 @@ class Planet extends SystemObject
         private $timekeeping;
         private $lastLocalTickDuration;
         private $lastUniversalTickDuration;
+        private $biosphere;
 
         public function __construct (string $name, float $mass = 0.0, float $radius = 0.0, ?array $position = null, ?array $velocity = null)
         {
@@ -52,7 +53,9 @@ class Planet extends SystemObject
                 $this->timekeeping = $this->generateTimekeepingProfile();
                 $this->lastLocalTickDuration = 0.0;
                 $this->lastUniversalTickDuration = 0.0;
+                $this->biosphere = array();
                 $this->setDescription('A newly catalogued world awaiting survey data.');
+                $this->regenerateBiosphere(true);
         }
 
         public function setAtmosphere (array $composition) : void
@@ -439,8 +442,239 @@ class Planet extends SystemObject
                         'classification' => $this->habitabilityClass,
                         'factors' => $this->habitabilityFactors,
                         'timekeeping' => $this->getTimekeepingProfile(),
-                        'longevity' => $this->summarizePopulationLongevity()
+                        'longevity' => $this->summarizePopulationLongevity(),
+                        'net_worth' => $this->getNetWorth(),
+                        'biosphere' => $this->getBiosphereComposition()
                 );
+        }
+
+        public function getNetWorth () : float
+        {
+                $total = 0.0;
+                foreach ($this->countries as $country)
+                {
+                        if (!($country instanceof Country)) continue;
+                        $total += $country->getNetWorth();
+                }
+                return max(0.0, $total);
+        }
+
+        public function getBiosphereComposition () : array
+        {
+                if (empty($this->biosphere))
+                {
+                        return array('kingdoms' => array(), 'phyla' => array(), 'entries' => array());
+                }
+                $kingdoms = array();
+                $phyla = array();
+                $entries = array();
+                foreach ($this->biosphere as $entry)
+                {
+                        if (!is_array($entry)) continue;
+                        $kingdom = strval($entry['kingdom'] ?? 'Unknown');
+                        $phylum = strval($entry['phylum'] ?? 'Unclassified');
+                        $share = floatval($entry['share'] ?? 0.0);
+                        if ($share <= 0.0) continue;
+                        if (!array_key_exists($kingdom, $kingdoms))
+                        {
+                                $kingdoms[$kingdom] = 0.0;
+                        }
+                        $kingdoms[$kingdom] += $share;
+                        if (!array_key_exists($phylum, $phyla))
+                        {
+                                $phyla[$phylum] = 0.0;
+                        }
+                        $phyla[$phylum] += $share;
+                        $entries[] = array(
+                                'kingdom' => $kingdom,
+                                'phylum' => $phylum,
+                                'share' => round($share * 100.0, 2)
+                        );
+                }
+                return array(
+                        'kingdoms' => $this->normalizeShareMap($kingdoms),
+                        'phyla' => $this->normalizeShareMap($phyla),
+                        'entries' => $entries
+                );
+        }
+
+        public function getMapOverview (int $peopleLimit = 0) : array
+        {
+                $countries = array();
+                $cities = array();
+                $residents = array();
+                foreach ($this->countries as $country)
+                {
+                        if (!($country instanceof Country)) continue;
+                        $territory = $country->getTerritoryProfile();
+                        $countryEntry = array(
+                                'name' => $country->getName(),
+                                'center' => $territory['center'] ?? null,
+                                'span' => $territory['span'] ?? null,
+                                'terrain' => $territory['terrain'] ?? null,
+                                'biome' => $territory['biome'] ?? null,
+                                'population' => $country->getPopulation(),
+                                'net_worth' => $country->getNetWorth(),
+                                'wealth_per_capita' => $country->getWealthPerCapita()
+                        );
+                        $countries[] = $countryEntry;
+                        foreach ($country->getCities() as $city)
+                        {
+                                if (!($city instanceof City)) continue;
+                                $coords = $city->getCoordinates();
+                                $cityEntry = array(
+                                        'name' => $city->getName(),
+                                        'country' => $country->getName(),
+                                        'coordinates' => $coords,
+                                        'radius' => $city->getRadius(),
+                                        'population' => $city->getPopulation()
+                                );
+                                $cities[] = $cityEntry;
+                                $residentsList = $city->getResidents();
+                                if (!is_array($residentsList) || empty($residentsList))
+                                {
+                                        continue;
+                                }
+                                $limit = ($peopleLimit > 0) ? min($peopleLimit, count($residentsList)) : count($residentsList);
+                                for ($i = 0; $i < $limit; $i++)
+                                {
+                                        $person = $residentsList[$i];
+                                        if (!($person instanceof Person)) continue;
+                                        $location = $person->getCoordinates() ?? $coords;
+                                        $residents[] = array(
+                                                'name' => $person->getName(),
+                                                'city' => $city->getName(),
+                                                'country' => $country->getName(),
+                                                'coordinates' => $location,
+                                                'net_worth' => $person->getNetWorth()
+                                        );
+                                }
+                        }
+                }
+                return array(
+                        'projection' => 'equirectangular',
+                        'width' => 360,
+                        'height' => 180,
+                        'countries' => $countries,
+                        'cities' => $cities,
+                        'residents' => $residents
+                );
+        }
+
+        private function regenerateBiosphere (bool $force) : void
+        {
+                $biosignatures = self::normalizeFraction($this->environment['biosignatures'] ?? 0.0);
+                if ($biosignatures <= 0.05)
+                {
+                        if ($force || !empty($this->biosphere))
+                        {
+                                $this->biosphere = array();
+                        }
+                        return;
+                }
+                if (!$force && !empty($this->biosphere))
+                {
+                        return;
+                }
+
+                $water = self::normalizeFraction($this->environment['water'] ?? 0.0);
+                $atmosphere = self::normalizeFraction($this->environment['atmosphere'] ?? 0.0);
+                $temperature = floatval($this->environment['temperature'] ?? 0.0);
+                $habitability = max(0.0, min(1.0, $this->habitabilityScore));
+
+                $weights = array(
+                        'Animalia' => 0.2 + ($habitability * 0.5) + ($water * 0.2),
+                        'Plantae' => 0.25 + ($water * 0.5),
+                        'Fungi' => 0.12 + ($atmosphere * 0.2),
+                        'Protista' => 0.1 + ($water * 0.3),
+                        'Bacteria' => 0.15 + (($temperature > 40.0) ? 0.15 : 0.07),
+                        'Archaea' => 0.08 + (($temperature > 80.0) ? 0.25 : 0.05)
+                );
+                $totalWeight = array_sum($weights);
+                if ($totalWeight <= 0.0)
+                {
+                        $this->biosphere = array();
+                        return;
+                }
+                foreach ($weights as $key => $value)
+                {
+                        $weights[$key] = max(0.0, $value / $totalWeight);
+                }
+
+                $phyla = array(
+                        'Animalia' => array('Chordata', 'Arthropoda', 'Mollusca', 'Echinodermata', 'Cnidaria'),
+                        'Plantae' => array('Bryophyta', 'Magnoliophyta', 'Coniferophyta', 'Pteridophyta', 'Chlorophyta'),
+                        'Fungi' => array('Basidiomycota', 'Ascomycota', 'Glomeromycota', 'Zygomycota'),
+                        'Protista' => array('Diatomophyta', 'Dinoflagellata', 'Radiolaria', 'Euglenozoa'),
+                        'Bacteria' => array('Cyanobacteria', 'Proteobacteria', 'Firmicutes', 'Actinobacteria'),
+                        'Archaea' => array('Halobacteria', 'Thermoprotei', 'Methanobacteria', 'Thaumarchaeota')
+                );
+
+                $groups = max(3, min(18, intval(round($biosignatures * 10)) + mt_rand(1, 4)));
+                $remaining = 1.0;
+                $entries = array();
+                for ($i = 0; $i < $groups; $i++)
+                {
+                        if ($i === $groups - 1)
+                        {
+                                $share = max(0.01, $remaining);
+                        }
+                        else
+                        {
+                                $maxShare = max(0.05, $remaining - max(0.05, ($groups - $i - 1) * 0.03));
+                                $share = max(0.01, min($maxShare, ($biosignatures * mt_rand(5, 20)) / 100.0));
+                        }
+                        $remaining = max(0.0, $remaining - $share);
+                        $kingdom = $this->weightedChoice($weights);
+                        $options = $phyla[$kingdom] ?? array('Unclassified');
+                        $phylum = $options[mt_rand(0, count($options) - 1)];
+                        $entries[] = array(
+                                'kingdom' => $kingdom,
+                                'phylum' => $phylum,
+                                'share' => $share
+                        );
+                }
+                if ($remaining > 0.0 && !empty($entries))
+                {
+                        $entries[0]['share'] += $remaining;
+                }
+                $this->biosphere = $entries;
+        }
+
+        private function weightedChoice (array $weights) : string
+        {
+                $roll = mt_rand(0, 1000) / 1000.0;
+                $cumulative = 0.0;
+                foreach ($weights as $key => $weight)
+                {
+                        $cumulative += max(0.0, $weight);
+                        if ($roll <= $cumulative)
+                        {
+                                return $key;
+                        }
+                }
+                $keys = array_keys($weights);
+                return strval(reset($keys));
+        }
+
+        private function normalizeShareMap (array $map) : array
+        {
+                if (empty($map))
+                {
+                        return array();
+                }
+                $total = array_sum($map);
+                if ($total <= 0.0)
+                {
+                        return array();
+                }
+                $normalized = array();
+                foreach ($map as $key => $value)
+                {
+                        $normalized[$key] = round(($value / $total) * 100.0, 2);
+                }
+                arsort($normalized);
+                return $normalized;
         }
 
         private function summarizePopulationLongevity () : array
@@ -650,6 +884,7 @@ class Planet extends SystemObject
                 $this->climateProfile = $this->deriveClimateProfile();
                 $this->initializeWeatherSystems($forceWeather);
                 $this->refreshDescription();
+                $this->regenerateBiosphere($forceWeather);
         }
 
         private function deriveClimateProfile () : array

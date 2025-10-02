@@ -20,6 +20,9 @@ class Person extends Life
         private $backstory;
         private $relationships;
         private $chronicle;
+        private $netWorth;
+        private $coordinates;
+        private $residenceCity;
 
         public function __construct (string $name, ?Country $homeCountry = null, array $traits = array())
         {
@@ -43,6 +46,9 @@ class Person extends Life
                 $this->backstory = '';
                 $this->relationships = array();
                 $this->chronicle = array();
+                $this->netWorth = max(0.0, floatval($traits['net_worth'] ?? 0.0));
+                $this->coordinates = null;
+                $this->residenceCity = null;
                 if ($this->mortalityModel === '')
                 {
                         $this->mortalityModel = 'finite';
@@ -182,6 +188,69 @@ class Person extends Life
         public function getJob () : ?Job
         {
                 return $this->job;
+        }
+
+        public function setResidenceCity (?City $city) : void
+        {
+                if ($this->residenceCity === $city)
+                {
+                        return;
+                }
+
+                $this->residenceCity = $city;
+                if ($city instanceof City)
+                {
+                        $coords = $city->getCoordinates();
+                        $this->setCoordinates($this->scatterWithinCity($coords, $city->getRadius()));
+                }
+        }
+
+        public function getResidenceCity () : ?City
+        {
+                return $this->residenceCity;
+        }
+
+        public function setCoordinates (?array $coordinates) : void
+        {
+                if ($coordinates === null)
+                {
+                        $this->coordinates = null;
+                        return;
+                }
+                $latitude = floatval($coordinates['latitude'] ?? ($coordinates['lat'] ?? 0.0));
+                $longitude = floatval($coordinates['longitude'] ?? ($coordinates['lon'] ?? 0.0));
+                $this->coordinates = array('latitude' => $latitude, 'longitude' => $longitude);
+                $this->setTrait('latitude', $latitude);
+                $this->setTrait('longitude', $longitude);
+        }
+
+        public function getCoordinates () : ?array
+        {
+                if ($this->coordinates === null)
+                {
+                        return null;
+                }
+                return $this->coordinates;
+        }
+
+        public function setNetWorth (float $amount) : void
+        {
+                $this->netWorth = max(0.0, $amount);
+                $this->setTrait('net_worth', $this->netWorth);
+        }
+
+        public function adjustNetWorth (float $delta) : void
+        {
+                if ($delta === 0.0)
+                {
+                        return;
+                }
+                $this->setNetWorth($this->netWorth + $delta);
+        }
+
+        public function getNetWorth () : float
+        {
+                return $this->netWorth;
         }
 
         public function addSkill (string $name, float $level = 0.0) : void
@@ -532,6 +601,25 @@ class Person extends Life
                                 $this->calmAccumulator -= ($periods * $calmThreshold);
                         }
                 }
+        }
+
+        private function scatterWithinCity (array $coordinates, float $radius) : array
+        {
+                $latitude = floatval($coordinates['latitude'] ?? 0.0);
+                $longitude = floatval($coordinates['longitude'] ?? 0.0);
+                $spread = max(0.1, $radius * 0.05);
+                $latitude += mt_rand(-1000, 1000) / 1000.0 * $spread;
+                $longitude += mt_rand(-1000, 1000) / 1000.0 * $spread;
+                $latitude = max(-90.0, min(90.0, $latitude));
+                if ($longitude < -180.0)
+                {
+                        $longitude += 360.0;
+                }
+                elseif ($longitude > 180.0)
+                {
+                        $longitude -= 360.0;
+                }
+                return array('latitude' => $latitude, 'longitude' => $longitude);
         }
 }
 ?>
