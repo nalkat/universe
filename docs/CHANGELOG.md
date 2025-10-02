@@ -2,6 +2,7 @@
 
 ## [Unreleased]
 - Persisted narrative descriptions and chronicles in a repository-local SQLite metadata store so simulator objects share cached lore without inflating in-memory payloads.
+- Added entity-scoped metadata keys, description updates, and chronicle pruning so the SQLite lore store stays compact and the GUI catalog remains responsive during large runs.
 - Added configurable `--workers` support and parallel galaxy advancement to exploit multi-core CPUs when the PHP `parallel` extension is available.
 - Offloaded GUI catalog loading to a background worker with inline status updates so large catalogs no longer freeze the control panel.
 - Added pause/resume/stop controls, a persistent status indicator, and a reset workflow to the Tkinter control panel so operators can manage and monitor long-running simulations without leaving the GUI.

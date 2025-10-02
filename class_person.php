@@ -325,9 +325,39 @@ class Person extends Life
                         return;
                 }
                 $store = MetadataStore::instance();
-                $this->backstoryId = $store->storeDescription($normalized, 'PersonBackstory');
+                $key = $this->narrativeEntityKey() . ':backstory';
+                $changed = false;
+                if ($this->backstoryId !== null)
+                {
+                        $current = $store->fetchDescription($this->backstoryId);
+                        if ($current !== $normalized)
+                        {
+                                $changed = $store->updateDescription($this->backstoryId, $normalized);
+                                if (!$changed)
+                                {
+                                        $inserted = $store->storeDescription($normalized, 'PersonBackstory', $key);
+                                        if ($inserted > 0)
+                                        {
+                                                $this->backstoryId = $inserted;
+                                                $changed = true;
+                                        }
+                                }
+                        }
+                }
+                else
+                {
+                        $inserted = $store->storeDescription($normalized, 'PersonBackstory', $key);
+                        if ($inserted > 0)
+                        {
+                                $this->backstoryId = $inserted;
+                                $changed = true;
+                        }
+                }
                 $this->setTrait('backstory', $normalized);
-                $this->recordChronicleEntry('backstory', $normalized, null, array($this->getName()));
+                if ($changed)
+                {
+                        $this->recordChronicleEntry('backstory', $normalized, null, array($this->getName()));
+                }
         }
 
         public function getBackstory () : string
