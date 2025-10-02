@@ -22,3 +22,4 @@
 - [ ] Stress-test habitat experimentation loops across multi-season environmental scenarios.
 - [x] Surface biosphere composition summaries and economic telemetry throughout the catalog hierarchy.
 - [x] Parallelize galaxy advancement with a configurable worker pool to leverage multi-core hosts.
+- [x] Stabilize random event sampling so empty catalogs or small populations cannot crash the simulator.

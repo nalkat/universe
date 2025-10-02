@@ -355,37 +355,25 @@ class Universe
 		self::$rotation_speed += $adjust;
 	}
 
-	private function randomEvent () : void
-	{
-		// randomly roll for the object which will be the only one guaranteed to be affected by this event
-		$object = random_int(1,intval(count(Universe::$objectList)));
-		$objIDs[] = $object;
-		if ((random_int(1,394823) % 2) === 0) {
-			// if the value picked from the random pool is even, set the multiObject flag
-			$multiObject = true;
-		} else {
-			$multiObject = false;
-		}
-		if ($multiObject === true)
-		{
-			$allAffected = false;
-			$numAffected = intval(random_int(0,intval(log((1.5*(3/7))-25)))); // find how many objects are affected by the event
-			if ($numAffected > self::$numObjects)
-			{
-				// if the number of affected objects is greater than the number of objects
-				$allAfected = true;
-			}
-			while (($allAffected !== true) && (intval($numAffected) > 1)) 
-			{ // if the number of objects to choose > 1, iterate loop code
-				if (count($objIDs) <= $numAffected)
-				{
-					// as long as we don't have more objects in the affected pool, grab and stuff another id
-					// we will allow duplicated ids in the pool. A duplicate means that the object with multiple entries is affected multiple times
-					$objIDs[] = random_int(1,self::$numObjects); // get a random object id and stuff it in the array with the first object
-				}
-				$numAffected--;
-			}
-		}
+        private function randomEvent () : void
+        {
+                $totalObjects = count(self::$objectList);
+                if ($totalObjects === 0) {
+                        return;
+                }
+
+                // randomly roll for the object which will be the only one guaranteed to be affected by this event
+                $object = random_int(1, $totalObjects);
+                $objIDs = [$object];
+                $multiObject = (random_int(1, 394823) % 2) === 0;
+
+                if ($multiObject && $totalObjects > 1) {
+                        $numAffected = random_int(2, $totalObjects);
+                        while (count($objIDs) < $numAffected) {
+                                // allow duplicates so objects can be affected multiple times
+                                $objIDs[] = random_int(1, $totalObjects);
+                        }
+                }
 		$verb = random_int(1,4);
 		switch($verb)
 		{
