@@ -78,11 +78,13 @@ references mentors, rivals, and shared community history. Access these strings v
 `SystemObject::getDescription()`, `Country::getDescription()`, and `Person::getBackstory()`
 to differentiate entries in upcoming UI layers.
 
-All of this prose now lives in a repository-local SQLite cache managed by
-`MetadataStore`. Descriptions and chronicle entries are stored once in
-`runtime/meta/metadata.sqlite` and referenced by ID, dramatically reducing in-memory
-pressure while letting parallel workers share the same lore without additional wiring.
-The store automatically deduplicates entries, enforces chronicle limits, and keeps
+All of this prose now lives in a repository-local metadata cache managed by
+`MetadataStore`. By default the simulator connects to the bundled PostgreSQL
+database specified in `config/metadata.php`, storing descriptions and chronicle
+entries once and referencing them by ID to dramatically reduce in-memory pressure.
+When the database is unavailable the store falls back to
+`runtime/meta/metadata.sqlite`, ensuring lore survives even on minimal setups. In
+both modes the cache deduplicates entries, enforces chronicle limits, and keeps
 description fetches hot via an in-process cache.
 
 ### Parallel stepping and SMP utilization

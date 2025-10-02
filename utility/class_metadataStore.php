@@ -3,13 +3,16 @@
 final class MetadataStore
 {
         private const DB_FILENAME = 'metadata.sqlite';
-        private const DEFAULT_CHRONICLE_LIMIT = 64;
+        public const DEFAULT_CHRONICLE_LIMIT = 64;
         private const LEGACY_ENTITY_KEY = '';
+
+        private const DRIVER_SQLITE = 'sqlite';
+        private const DRIVER_POSTGRES = 'pgsql';
 
         private static ?MetadataStore $instance = null;
 
-        /** @var SQLite3 */
-        private $db;
+        private \PDO $connection;
+        private string $driver;
 
         /** @var array<int, string> */
         private array $descriptionCache = array();
@@ -18,6 +21,88 @@ final class MetadataStore
         private array $chronicleCache = array();
 
         private function __construct()
+        {
+                $config = $this->loadConfiguration();
+                $this->driver = $config['driver'];
+
+                if ($this->driver === self::DRIVER_POSTGRES)
+                {
+                        try
+                        {
+                                $this->connection = $this->connectPostgres($config);
+                        }
+                        catch (\Throwable $exception)
+                        {
+                                $this->driver = self::DRIVER_SQLITE;
+                                $this->connection = $this->connectSqlite($config);
+                        }
+                }
+                else
+                {
+                        $this->driver = self::DRIVER_SQLITE;
+                        $this->connection = $this->connectSqlite($config);
+                }
+
+                $this->initializeSchema();
+        }
+
+        private function loadConfiguration() : array
+        {
+                $defaults = array(
+                        'driver' => self::DRIVER_SQLITE,
+                        'host' => 'localhost',
+                        'port' => 5432,
+                        'database' => null,
+                        'user' => null,
+                        'password' => null,
+                        'options' => array(),
+                        'path' => null,
+                );
+
+                $root = defined('PHPROOT') ? PHPROOT : (realpath(__DIR__ . '/..') ?: __DIR__);
+                $configPath = $root . DIRECTORY_SEPARATOR . 'config' . DIRECTORY_SEPARATOR . 'metadata.php';
+                $config = array();
+                if (is_file($configPath))
+                {
+                        $loaded = include $configPath;
+                        if (is_array($loaded))
+                        {
+                                $config = $loaded;
+                        }
+                }
+
+                $merged = array_merge($defaults, $config);
+                $driver = strtolower(strval($merged['driver']));
+                if ($driver !== self::DRIVER_POSTGRES)
+                {
+                        $driver = self::DRIVER_SQLITE;
+                }
+                $merged['driver'] = $driver;
+
+                return $merged;
+        }
+
+        private function createOptions(array $config) : array
+        {
+                $options = array();
+                if (isset($config['options']) && is_array($config['options']))
+                {
+                        $options = $config['options'];
+                }
+
+                $options[\PDO::ATTR_ERRMODE] = \PDO::ERRMODE_EXCEPTION;
+                $options[\PDO::ATTR_DEFAULT_FETCH_MODE] = \PDO::FETCH_ASSOC;
+                $options[\PDO::ATTR_EMULATE_PREPARES] = false;
+
+                if ($this->driver === self::DRIVER_SQLITE)
+                {
+                        $options[\PDO::ATTR_TIMEOUT] = 5;
+                }
+
+                return $options;
+        }
+
+        private function connectSqlite(array $config) : \PDO
         {
                 $root = defined('PHPROOT') ? PHPROOT : (realpath(__DIR__ . '/..') ?: __DIR__);
                 $runtimeRoot = $root . DIRECTORY_SEPARATOR . 'runtime';
@@ -30,42 +115,133 @@ final class MetadataStore
                 {
                         mkdir($metadataRoot, 0777, true);
                 }
-                $databasePath = $metadataRoot . DIRECTORY_SEPARATOR . self::DB_FILENAME;
-                $this->db = new SQLite3($databasePath);
-                if (method_exists($this->db, 'busyTimeout'))
+                $databasePath = $config['path'];
+                if (!is_string($databasePath) || $databasePath === '')
                 {
-                        $this->db->busyTimeout(5000);
+                        $databasePath = $metadataRoot . DIRECTORY_SEPARATOR . self::DB_FILENAME;
                 }
-                $this->db->exec('PRAGMA journal_mode=WAL');
-                $this->db->exec('PRAGMA synchronous=NORMAL');
-                $this->initializeSchema();
+
+                $dsn = 'sqlite:' . $databasePath;
+                $connection = new \PDO($dsn, null, null, $this->createOptions($config));
+                $connection->exec('PRAGMA journal_mode=WAL');
+                $connection->exec('PRAGMA synchronous=NORMAL');
+                $connection->exec('PRAGMA busy_timeout=5000');
+                return $connection;
+        }
+
+        private function connectPostgres(array $config) : \PDO
+        {
+                $database = $config['database'];
+                if (!is_string($database) || $database === '')
+                {
+                        $database = is_string($config['user']) && $config['user'] !== '' ? $config['user'] : 'postgres';
+                }
+                $host = strval($config['host'] ?? 'localhost');
+                $port = intval($config['port'] ?? 5432);
+                if ($port <= 0)
+                {
+                        $port = 5432;
+                }
+                $dsn = sprintf('pgsql:host=%s;port=%d;dbname=%s', $host, $port, $database);
+                $user = is_string($config['user']) ? $config['user'] : '';
+                $password = is_string($config['password']) ? $config['password'] : '';
+
+                return new \PDO($dsn, $user, $password, $this->createOptions($config));
         }
 
         /**
-         * @return SQLite3Result|true|null
+         * @template T
+         * @param callable():T $operation
+         * @return T
          */
-        private function executeStatement(SQLite3Stmt $statement)
+        private function withRetry(callable $operation)
         {
                 $attempts = 0;
                 $delay = 50000;
                 while (true)
                 {
-                        $result = @$statement->execute();
-                        if ($result !== false)
+                        try
                         {
-                                return $result;
+                                return $operation();
                         }
-                        $errorCode = $this->db->lastErrorCode();
-                        if (($errorCode === SQLITE3_BUSY || $errorCode === SQLITE3_LOCKED) && $attempts < 5)
+                        catch (\PDOException $exception)
                         {
-                                usleep($delay);
-                                $delay *= 2;
-                                $attempts++;
-                                continue;
+                                if ($this->isRetryableException($exception) && $attempts < 5)
+                                {
+                                        usleep($delay);
+                                        $delay *= 2;
+                                        $attempts++;
+                                        continue;
+                                }
+
+                                throw new \RuntimeException('Failed to execute metadata statement: ' . $exception->getMessage(), 0, $exception);
                         }
-                        $message = $this->db->lastErrorMsg();
-                        throw new RuntimeException('Failed to execute metadata statement: ' . $message);
                 }
+        }
+
+        private function isRetryableException(\PDOException $exception) : bool
+        {
+                if ($this->driver === self::DRIVER_SQLITE)
+                {
+                        $info = $exception->errorInfo;
+                        if (is_array($info))
+                        {
+                                $code = $info[1] ?? null;
+                                return $code === 5 || $code === 6;
+                        }
+                        return false;
+                }
+
+                if ($this->driver === self::DRIVER_POSTGRES)
+                {
+                        $code = $exception->getCode();
+                        return $code === '40001' || $code === '40P01';
+                }
+
+                return false;
+        }
+
+        private function exec(string $sql) : void
+        {
+                $this->withRetry(function () use ($sql) : int {
+                        $result = $this->connection->exec($sql);
+                        if ($result === false)
+                        {
+                                $error = $this->connection->errorInfo();
+                                $message = is_array($error) ? strval($error[2] ?? 'Unknown error') : 'Unknown error';
+                                throw new \RuntimeException('Failed to execute metadata statement: ' . $message);
+                        }
+                        return $result;
+                });
+        }
+
+        private function runStatement(string $sql, array $parameters = array()) : \PDOStatement
+        {
+                $statement = $this->connection->prepare($sql);
+                if ($statement === false)
+                {
+                        throw new \RuntimeException('Failed to prepare metadata statement.');
+                }
+
+                return $this->withRetry(function () use ($statement, $parameters) : \PDOStatement {
+                        if (!$statement->execute($parameters))
+                        {
+                                throw new \RuntimeException('Failed to execute metadata statement.');
+                        }
+                        return $statement;
+                });
+        }
+
+        private function query(string $sql) : \PDOStatement
+        {
+                return $this->withRetry(function () use ($sql) : \PDOStatement {
+                        $statement = $this->connection->query($sql);
+                        if ($statement === false)
+                        {
+                                throw new \RuntimeException('Failed to query metadata store.');
+                        }
+                        return $statement;
+                });
         }
 
         public static function instance() : MetadataStore
@@ -79,69 +255,98 @@ final class MetadataStore
 
         private function initializeSchema() : void
         {
-                $this->db->exec('CREATE TABLE IF NOT EXISTS metadata_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
-                $descriptionSql = <<<SQL
-CREATE TABLE IF NOT EXISTS descriptions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        category TEXT NOT NULL,
-        entity_key TEXT NOT NULL,
-        content TEXT NOT NULL,
-        created_at REAL NOT NULL
-);
-SQL;
-                $chronicleSql = <<<SQL
-CREATE TABLE IF NOT EXISTS chronicles (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        category TEXT NOT NULL,
-        entity_key TEXT NOT NULL,
-        type TEXT NOT NULL,
-        content TEXT NOT NULL,
-        timestamp REAL NOT NULL,
-        participants TEXT NOT NULL
-);
-SQL;
-                $this->db->exec($descriptionSql);
-                $this->db->exec($chronicleSql);
-                $this->db->exec('CREATE INDEX IF NOT EXISTS idx_descriptions_category ON descriptions(category)');
-                $this->db->exec('CREATE INDEX IF NOT EXISTS idx_chronicles_category ON chronicles(category)');
-                $this->db->exec('CREATE INDEX IF NOT EXISTS idx_descriptions_entity ON descriptions(entity_key)');
-                $this->db->exec('CREATE INDEX IF NOT EXISTS idx_chronicles_entity ON chronicles(entity_key)');
-                $this->ensureColumn('descriptions', 'entity_key', "TEXT NOT NULL DEFAULT ''");
-                $this->ensureColumn('chronicles', 'entity_key', "TEXT NOT NULL DEFAULT ''");
-                $this->purgeLegacyRows();
+                if ($this->driver === self::DRIVER_POSTGRES)
+                {
+                        $this->exec('CREATE TABLE IF NOT EXISTS metadata_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+                        $this->exec('CREATE TABLE IF NOT EXISTS descriptions (
+                                id BIGSERIAL PRIMARY KEY,
+                                category TEXT NOT NULL,
+                                entity_key TEXT NOT NULL,
+                                content TEXT NOT NULL,
+                                created_at DOUBLE PRECISION NOT NULL
+                        )');
+                        $this->exec('CREATE TABLE IF NOT EXISTS chronicles (
+                                id BIGSERIAL PRIMARY KEY,
+                                category TEXT NOT NULL,
+                                entity_key TEXT NOT NULL,
+                                type TEXT NOT NULL,
+                                content TEXT NOT NULL,
+                                timestamp DOUBLE PRECISION NOT NULL,
+                                participants TEXT NOT NULL
+                        )');
+                }
+                else
+                {
+                        $this->exec('CREATE TABLE IF NOT EXISTS metadata_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+                        $this->exec('CREATE TABLE IF NOT EXISTS descriptions (
+                                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                category TEXT NOT NULL,
+                                entity_key TEXT NOT NULL,
+                                content TEXT NOT NULL,
+                                created_at REAL NOT NULL
+                        )');
+                        $this->exec('CREATE TABLE IF NOT EXISTS chronicles (
+                                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                category TEXT NOT NULL,
+                                entity_key TEXT NOT NULL,
+                                type TEXT NOT NULL,
+                                content TEXT NOT NULL,
+                                timestamp REAL NOT NULL,
+                                participants TEXT NOT NULL
+                        )');
+                }
+
+                $this->exec('CREATE INDEX IF NOT EXISTS idx_descriptions_category ON descriptions(category)');
+                $this->exec('CREATE INDEX IF NOT EXISTS idx_chronicles_category ON chronicles(category)');
+                $this->exec('CREATE INDEX IF NOT EXISTS idx_descriptions_entity ON descriptions(entity_key)');
+                $this->exec('CREATE INDEX IF NOT EXISTS idx_chronicles_entity ON chronicles(entity_key)');
+
+                if ($this->driver === self::DRIVER_SQLITE)
+                {
+                        $this->ensureColumn('descriptions', 'entity_key', "TEXT NOT NULL DEFAULT ''");
+                        $this->ensureColumn('chronicles', 'entity_key', "TEXT NOT NULL DEFAULT ''");
+                        $this->purgeLegacyRows();
+                }
         }
 
         private function ensureColumn(string $table, string $column, string $definition) : void
         {
-                $exists = false;
-                $result = $this->db->query('PRAGMA table_info(' . $table . ')');
-                if ($result instanceof SQLite3Result)
+                if ($this->driver !== self::DRIVER_SQLITE)
                 {
-                        while ($row = $result->fetchArray(SQLITE3_ASSOC))
+                        return;
+                }
+
+                $exists = false;
+                $statement = $this->query('PRAGMA table_info(' . $table . ')');
+                while ($row = $statement->fetch())
+                {
+                        if (isset($row['name']) && strval($row['name']) === $column)
                         {
-                                if (isset($row['name']) && strval($row['name']) === $column)
-                                {
-                                        $exists = true;
-                                        break;
-                                }
+                                $exists = true;
+                                break;
                         }
                 }
                 if ($exists)
                 {
                         return;
                 }
-                $this->db->exec('ALTER TABLE ' . $table . ' ADD COLUMN ' . $column . ' ' . $definition);
+                $this->exec('ALTER TABLE ' . $table . ' ADD COLUMN ' . $column . ' ' . $definition);
         }
 
         private function purgeLegacyRows() : void
         {
-                $this->db->exec('DELETE FROM descriptions WHERE entity_key = \'' . self::LEGACY_ENTITY_KEY . '\'');
-                $changes = $this->db->changes();
-                $this->db->exec('DELETE FROM chronicles WHERE entity_key = \'' . self::LEGACY_ENTITY_KEY . '\'');
-                $changes += $this->db->changes();
+                if ($this->driver !== self::DRIVER_SQLITE)
+                {
+                        return;
+                }
+
+                $statement = $this->runStatement('DELETE FROM descriptions WHERE entity_key = :entity_key', array(':entity_key' => self::LEGACY_ENTITY_KEY));
+                $changes = $statement->rowCount();
+                $statement = $this->runStatement('DELETE FROM chronicles WHERE entity_key = :entity_key', array(':entity_key' => self::LEGACY_ENTITY_KEY));
+                $changes += $statement->rowCount();
                 if ($changes > 0)
                 {
-                        $this->db->exec('VACUUM');
+                        $this->exec('VACUUM');
                 }
         }
 
@@ -152,25 +357,30 @@ SQL;
                 {
                         return 0;
                 }
-                $statement = $this->db->prepare('INSERT INTO descriptions (category, entity_key, content, created_at) VALUES (:category, :entity_key, :content, :created_at)');
-                if ($statement === false)
+
+                $params = array(
+                        ':category' => $category,
+                        ':entity_key' => $entityKey,
+                        ':content' => $normalized,
+                        ':created_at' => microtime(true),
+                );
+
+                if ($this->driver === self::DRIVER_POSTGRES)
                 {
-                        throw new RuntimeException('Failed to prepare description insert statement.');
+                        $statement = $this->runStatement('INSERT INTO descriptions (category, entity_key, content, created_at) VALUES (:category, :entity_key, :content, :created_at) RETURNING id', $params);
+                        $id = (int) $statement->fetchColumn();
                 }
-                $statement->bindValue(':category', $category, SQLITE3_TEXT);
-                $statement->bindValue(':entity_key', $entityKey, SQLITE3_TEXT);
-                $statement->bindValue(':content', $normalized, SQLITE3_TEXT);
-                $statement->bindValue(':created_at', microtime(true), SQLITE3_FLOAT);
-                $result = $this->executeStatement($statement);
-                if ($result instanceof SQLite3Result)
+                else
                 {
-                        $result->finalize();
+                        $this->runStatement('INSERT INTO descriptions (category, entity_key, content, created_at) VALUES (:category, :entity_key, :content, :created_at)', $params);
+                        $id = (int) $this->connection->lastInsertId();
                 }
-                $id = (int) $this->db->lastInsertRowID();
+
                 if ($id > 0)
                 {
                         $this->descriptionCache[$id] = $normalized;
                 }
+
                 return $id;
         }
 
@@ -184,22 +394,14 @@ SQL;
                 {
                         return $this->descriptionCache[$id];
                 }
-                $statement = $this->db->prepare('SELECT content FROM descriptions WHERE id = :id LIMIT 1');
-                if ($statement === false)
-                {
-                        return null;
-                }
-                $statement->bindValue(':id', $id, SQLITE3_INTEGER);
-                $result = $this->executeStatement($statement);
-                if (!($result instanceof SQLite3Result))
-                {
-                        return null;
-                }
-                $row = $result->fetchArray(SQLITE3_ASSOC);
+
+                $statement = $this->runStatement('SELECT content FROM descriptions WHERE id = :id LIMIT 1', array(':id' => $id));
+                $row = $statement->fetch();
                 if ($row === false)
                 {
                         return null;
                 }
+
                 $content = strval($row['content']);
                 $this->descriptionCache[$id] = $content;
                 return $content;
@@ -217,24 +419,19 @@ SQL;
                 {
                         return false;
                 }
-                $statement = $this->db->prepare('UPDATE descriptions SET content = :content, created_at = :created_at WHERE id = :id');
-                if ($statement === false)
-                {
-                        return false;
-                }
-                $statement->bindValue(':content', $normalized, SQLITE3_TEXT);
-                $statement->bindValue(':created_at', microtime(true), SQLITE3_FLOAT);
-                $statement->bindValue(':id', $id, SQLITE3_INTEGER);
-                $result = $this->executeStatement($statement);
-                if ($result instanceof SQLite3Result)
-                {
-                        $result->finalize();
-                }
-                if ($this->db->changes() > 0)
+
+                $statement = $this->runStatement('UPDATE descriptions SET content = :content, created_at = :created_at WHERE id = :id', array(
+                        ':content' => $normalized,
+                        ':created_at' => microtime(true),
+                        ':id' => $id,
+                ));
+
+                if ($statement->rowCount() > 0)
                 {
                         $this->descriptionCache[$id] = $normalized;
                         return true;
                 }
+
                 return false;
         }
 
@@ -248,33 +445,43 @@ SQL;
                 {
                         return 0;
                 }
-                $statement = $this->db->prepare('INSERT INTO chronicles (category, entity_key, type, content, timestamp, participants) VALUES (:category, :entity_key, :type, :content, :timestamp, :participants)');
-                if ($statement === false)
-                {
-                        throw new RuntimeException('Failed to prepare chronicle insert statement.');
-                }
+
                 $encodedParticipants = json_encode(array_values(array_unique(array_map('strval', $participants))), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-                $statement->bindValue(':category', $category, SQLITE3_TEXT);
-                $statement->bindValue(':entity_key', $entityKey, SQLITE3_TEXT);
-                $statement->bindValue(':type', $type, SQLITE3_TEXT);
-                $statement->bindValue(':content', $normalized, SQLITE3_TEXT);
-                $statement->bindValue(':timestamp', $timestamp, SQLITE3_FLOAT);
-                $statement->bindValue(':participants', $encodedParticipants ?: '[]', SQLITE3_TEXT);
-                $result = $this->executeStatement($statement);
-                if ($result instanceof SQLite3Result)
+                if ($encodedParticipants === false)
                 {
-                        $result->finalize();
+                        $encodedParticipants = '[]';
                 }
-                $id = (int) $this->db->lastInsertRowID();
+
+                $params = array(
+                        ':category' => $category,
+                        ':entity_key' => $entityKey,
+                        ':type' => $type,
+                        ':content' => $normalized,
+                        ':timestamp' => $timestamp,
+                        ':participants' => $encodedParticipants,
+                );
+
+                if ($this->driver === self::DRIVER_POSTGRES)
+                {
+                        $statement = $this->runStatement('INSERT INTO chronicles (category, entity_key, type, content, timestamp, participants) VALUES (:category, :entity_key, :type, :content, :timestamp, :participants) RETURNING id', $params);
+                        $id = (int) $statement->fetchColumn();
+                }
+                else
+                {
+                        $this->runStatement('INSERT INTO chronicles (category, entity_key, type, content, timestamp, participants) VALUES (:category, :entity_key, :type, :content, :timestamp, :participants)', $params);
+                        $id = (int) $this->connection->lastInsertId();
+                }
+
                 if ($id > 0)
                 {
                         $this->chronicleCache[$id] = array(
                                 'type' => $type,
                                 'text' => $normalized,
                                 'timestamp' => $timestamp,
-                                'participants' => json_decode($encodedParticipants ?: '[]', true) ?: array()
+                                'participants' => json_decode($encodedParticipants, true) ?: array(),
                         );
                 }
+
                 return $id;
         }
 
@@ -288,28 +495,21 @@ SQL;
                 {
                         return $this->chronicleCache[$id];
                 }
-                $statement = $this->db->prepare('SELECT type, content, timestamp, participants FROM chronicles WHERE id = :id LIMIT 1');
-                if ($statement === false)
-                {
-                        return null;
-                }
-                $statement->bindValue(':id', $id, SQLITE3_INTEGER);
-                $result = $this->executeStatement($statement);
-                if (!($result instanceof SQLite3Result))
-                {
-                        return null;
-                }
-                $row = $result->fetchArray(SQLITE3_ASSOC);
+
+                $statement = $this->runStatement('SELECT type, content, timestamp, participants FROM chronicles WHERE id = :id LIMIT 1', array(':id' => $id));
+                $row = $statement->fetch();
                 if ($row === false)
                 {
                         return null;
                 }
+
                 $entry = array(
                         'type' => strval($row['type']),
                         'text' => strval($row['content']),
                         'timestamp' => floatval($row['timestamp']),
-                        'participants' => json_decode(strval($row['participants']), true) ?: array()
+                        'participants' => json_decode(strval($row['participants']), true) ?: array(),
                 );
+
                 $this->chronicleCache[$id] = $entry;
                 return $entry;
         }
@@ -342,28 +542,18 @@ SQL;
                         return;
                 }
                 $placeholders = array();
+                $parameters = array();
                 foreach ($ids as $index => $id)
                 {
-                        $placeholders[] = ':id' . $index;
+                        $placeholder = ':id' . $index;
+                        $placeholders[] = $placeholder;
+                        $parameters[$placeholder] = (int) $id;
                 }
                 $sql = 'DELETE FROM chronicles WHERE id IN (' . implode(', ', $placeholders) . ')';
-                $statement = $this->db->prepare($sql);
-                if ($statement === false)
-                {
-                        return;
-                }
-                foreach ($ids as $index => $id)
-                {
-                        $statement->bindValue(':id' . $index, intval($id), SQLITE3_INTEGER);
-                }
-                $result = $this->executeStatement($statement);
-                if ($result instanceof SQLite3Result)
-                {
-                        $result->finalize();
-                }
+                $this->runStatement($sql, $parameters);
                 foreach ($ids as $id)
                 {
-                        $key = intval($id);
+                        $key = (int) $id;
                         unset($this->chronicleCache[$key]);
                 }
         }
@@ -400,140 +590,166 @@ trait MetadataBackedNarrative
                 return MetadataStore::DEFAULT_CHRONICLE_LIMIT;
         }
 
-        protected function narrativeEntityKey() : string
+        protected function narrativeKey() : string
         {
-                if (is_string($this->narrativeKey) && $this->narrativeKey !== '')
+                if ($this->narrativeKey !== null)
                 {
                         return $this->narrativeKey;
                 }
-                $identifier = null;
-                if (property_exists($this, 'id') && is_scalar($this->id) && strval($this->id) !== '')
+                if (method_exists($this, 'narrativeHandle'))
                 {
-                        $identifier = strval($this->id);
-                }
-                elseif (method_exists($this, 'getName'))
-                {
-                        $name = strval($this->getName());
-                        if ($name !== '')
+                        $handle = strval($this->narrativeHandle());
+                        if ($handle !== '')
                         {
-                                $identifier = $name;
+                                $this->narrativeKey = $handle;
+                                return $handle;
                         }
                 }
-                $parts = array(static::class);
-                if ($identifier !== null && $identifier !== '')
+                if (method_exists($this, 'identifier'))
                 {
-                        $parts[] = $identifier;
+                        $identifier = strval($this->identifier());
+                        if ($identifier !== '')
+                        {
+                                $this->narrativeKey = $identifier;
+                                return $identifier;
+                        }
                 }
-                $parts[] = spl_object_hash($this);
-                $this->narrativeKey = implode(':', $parts);
+                $this->narrativeKey = spl_object_hash($this);
                 return $this->narrativeKey;
         }
 
-        public function setDescription(string $description) : void
+        protected function narrativeDescription() : ?string
         {
-                $normalized = trim($description);
-                if ($normalized === '')
+                if ($this->descriptionId === null)
+                {
+                        return null;
+                }
+                return $this->metadataStore()->fetchDescription($this->descriptionId);
+        }
+
+        protected function ensureNarrativeDescription(string $content) : void
+        {
+                $store = $this->metadataStore();
+                if ($this->descriptionId === null)
+                {
+                        $this->descriptionId = $store->storeDescription($content, $this->narrativeCategory(), $this->narrativeKey());
+                        return;
+                }
+                if ($content === $this->narrativeDescription())
                 {
                         return;
                 }
+                $store->updateDescription($this->descriptionId, $content);
+        }
+
+        /**
+         * @return array<int, array>
+         */
+        protected function narrativeChronicles() : array
+        {
+                $handles = array();
+                foreach ($this->chronicleHandles as $handle)
+                {
+                        $handles[] = (int) $handle;
+                }
+                if (empty($handles))
+                {
+                        return array();
+                }
+                return $this->metadataStore()->fetchChronicleEntries($handles);
+        }
+
+        protected function addNarrativeChronicle(string $type, string $text, float $timestamp, array $participants) : void
+        {
                 $store = $this->metadataStore();
-                if ($this->descriptionId !== null)
+                $entry = $store->storeChronicleEntry($this->narrativeCategory(), $this->narrativeKey(), $type, $text, $timestamp, $participants);
+                if ($entry <= 0)
                 {
-                        $current = $store->fetchDescription($this->descriptionId);
-                        if ($current === $normalized)
-                        {
-                                return;
-                        }
-                        if ($store->updateDescription($this->descriptionId, $normalized))
-                        {
-                                return;
-                        }
+                        return;
                 }
-                $newId = $store->storeDescription(
-                        $normalized,
-                        $this->narrativeCategory(),
-                        $this->narrativeEntityKey()
-                );
-                if ($newId > 0)
+                $this->chronicleHandles[] = $entry;
+                $limit = $this->narrativeChronicleLimit();
+                if (count($this->chronicleHandles) > $limit)
                 {
-                        $this->descriptionId = $newId;
+                        $this->chronicleHandles = array_slice($this->chronicleHandles, -1 * $limit);
                 }
+        }
+
+        public function setDescription(string $content) : void
+        {
+                $this->ensureNarrativeDescription($content);
         }
 
         public function getDescription() : string
         {
-                if ($this->descriptionId === null)
+                $description = $this->narrativeDescription();
+                return ($description === null) ? '' : $description;
+        }
+
+        public function getChronicle(?int $limit = null) : array
+        {
+                $entries = $this->narrativeChronicles();
+                if ($limit !== null && $limit > 0 && count($entries) > $limit)
                 {
-                        return '';
+                        return array_slice($entries, -1 * $limit);
                 }
-                $fetched = $this->metadataStore()->fetchDescription($this->descriptionId);
-                return ($fetched === null) ? '' : $fetched;
+                return $entries;
         }
 
         public function addChronicleEntry(string $type, string $text, ?float $timestamp = null, array $participants = array()) : void
         {
-                $normalized = trim($text);
+                $normalized = trim(strval($text));
                 if ($normalized === '')
                 {
                         return;
                 }
-                $cleanType = Utility::cleanse_string($type === '' ? 'event' : $type);
-                $store = $this->metadataStore();
-                $recorded = $store->storeChronicleEntry(
-                        $this->narrativeCategory(),
-                        $this->narrativeEntityKey(),
-                        $cleanType,
-                        $normalized,
-                        ($timestamp === null) ? microtime(true) : floatval($timestamp),
-                        $participants
-                );
-                if ($recorded > 0)
-                {
-                        $this->chronicleHandles[] = $recorded;
-                        $limit = $this->narrativeChronicleLimit();
-                        if ($limit > 0 && count($this->chronicleHandles) > $limit)
-                        {
-                                $excess = array_slice($this->chronicleHandles, 0, count($this->chronicleHandles) - $limit);
-                                $this->chronicleHandles = array_slice($this->chronicleHandles, -$limit);
-                                $store->deleteChronicleEntries($excess);
-                        }
-                }
+                $resolvedTimestamp = ($timestamp === null) ? microtime(true) : floatval($timestamp);
+                $participantList = array_values(array_unique(array_map('strval', $participants)));
+                $this->addNarrativeChronicle($type, $normalized, $resolvedTimestamp, $participantList);
         }
 
         public function importChronicle(array $entries) : void
         {
-                $this->chronicleHandles = array();
+                if (empty($entries))
+                {
+                        return;
+                }
+                $store = $this->metadataStore();
+                $category = $this->narrativeCategory();
+                $key = $this->narrativeKey();
+                $handles = array();
                 foreach ($entries as $entry)
                 {
                         if (!is_array($entry))
                         {
                                 continue;
                         }
-                        $this->addChronicleEntry(
-                                strval($entry['type'] ?? 'event'),
-                                strval($entry['text'] ?? ''),
-                                isset($entry['timestamp']) ? floatval($entry['timestamp']) : null,
-                                is_array($entry['participants'] ?? null) ? $entry['participants'] : array()
-                        );
-                }
-        }
-
-        public function getChronicle(?int $limit = null) : array
-        {
-                if (empty($this->chronicleHandles))
-                {
-                        return array();
-                }
-                $handles = $this->chronicleHandles;
-                if ($limit !== null)
-                {
-                        $limit = max(0, (int) $limit);
-                        if ($limit === 0)
+                        $text = trim(strval($entry['text'] ?? ''));
+                        if ($text === '')
                         {
-                                return array();
+                                continue;
                         }
-                        $handles = array_slice($handles, -$limit);
+                        $type = strval($entry['type'] ?? 'event');
+                        $timestamp = $entry['timestamp'] ?? microtime(true);
+                        $participants = array();
+                        if (isset($entry['participants']) && is_array($entry['participants']))
+                        {
+                                $participants = $entry['participants'];
+                        }
+                        $handle = $store->storeChronicleEntry($category, $key, $type, $text, floatval($timestamp), $participants);
+                        if ($handle > 0)
+                        {
+                                $handles[] = $handle;
+                        }
                 }
-                return $this->metadataStore()->fetchChronicleEntries($handles);
+                if (!empty($handles))
+                {
+                        $this->chronicleHandles = array_merge($this->chronicleHandles, $handles);
+                        $limit = $this->narrativeChronicleLimit();
+                        if (count($this->chronicleHandles) > $limit)
+                        {
+                                $this->chronicleHandles = array_slice($this->chronicleHandles, -1 * $limit);
+                        }
+                }
         }
 }

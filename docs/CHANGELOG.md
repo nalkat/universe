@@ -6,6 +6,7 @@
 - Hardened random event generation to skip rolls when no catalog objects exist and to bound affected-object sampling so catalog queries no longer crash with invalid `random_int` ranges.
 - Persisted narrative descriptions and chronicles in a repository-local SQLite metadata store so simulator objects share cached lore without inflating in-memory payloads.
 - Added busy waits and retry guards to the SQLite metadata store so concurrent catalog builds and simulations no longer emit `database is locked` warnings.
+- Upgraded the metadata store to prefer the bundled PostgreSQL database (with automatic SQLite fallback) so lore persistence scales under heavy parallel workloads without locking contention.
 - Added entity-scoped metadata keys, description updates, and chronicle pruning so the SQLite lore store stays compact and the GUI catalog remains responsive during large runs.
 - Added configurable `--workers` support and parallel galaxy advancement to exploit multi-core CPUs when the PHP `parallel` extension is available.
 - Offloaded GUI catalog loading to a background worker with inline status updates so large catalogs no longer freeze the control panel.
