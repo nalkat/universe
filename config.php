@@ -36,6 +36,7 @@ UniverseSimulator,class_universeSimulator.php
 Galaxy,class_galaxy.php
 System,class_system.php
 SystemObject,class_systemObject.php
+TransitObject,class_transitObject.php
 Star,class_star.php
 Planet,class_planet.php
 Structure,class_structure.php

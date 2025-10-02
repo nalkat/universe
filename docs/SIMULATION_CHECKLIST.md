@@ -23,3 +23,6 @@
 - [x] Surface biosphere composition summaries and economic telemetry throughout the catalog hierarchy.
 - [x] Parallelize galaxy advancement with a configurable worker pool to leverage multi-core hosts.
 - [x] Stabilize random event sampling so empty catalogs or small populations cannot crash the simulator.
+- [x] Simulate galactic collisions and tidal interactions with recorded chronicles.
+- [x] Track intergalactic and intersystem transit objects, including propulsion and hull metadata.
+- [x] Model stellar mass-loss events that destabilize systems and eject unbound worlds.

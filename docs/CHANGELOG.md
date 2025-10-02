@@ -1,6 +1,8 @@
 # Change Log
 
 ## [Unreleased]
+- Modeled galactic tidal interactions, collision chronicles, and debris plumes while introducing `TransitObject` tracking for intergalactic wayfarers and intersystem couriers.
+- Added stellar mass-loss events that adjust planetary orbits, chronicle destabilization, and eject unbound worlds into tracked transit streams.
 - Hardened random event generation to skip rolls when no catalog objects exist and to bound affected-object sampling so catalog queries no longer crash with invalid `random_int` ranges.
 - Persisted narrative descriptions and chronicles in a repository-local SQLite metadata store so simulator objects share cached lore without inflating in-memory payloads.
 - Added entity-scoped metadata keys, description updates, and chronicle pruning so the SQLite lore store stays compact and the GUI catalog remains responsive during large runs.

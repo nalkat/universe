@@ -27,6 +27,7 @@ class Galaxy
         private $movement_direction;
         private $last_location;
         private $current_location;
+        private $influenceRadius;
 
         private $systems;
         private $objects;
@@ -82,6 +83,7 @@ class Galaxy
                 $this->movement_direction = array ('x' => floatval(0), 'y' => floatval(0), 'z' => floatval(0));
                 $this->last_location = array('x' => floatval(0), 'y' => floatval(0), 'z' => floatval(0));
                 $this->current_location = array('x' => floatval(0), 'y' => floatval(0), 'z' => floatval(0));
+                $this->influenceRadius = floatval(0);
                 $this->systems = array();
                 $this->objects = array();
                 $this->empty_space = floatval(0);
@@ -115,6 +117,7 @@ class Galaxy
                 if (is_float($x)) {
                         $this->max_x = $x;
                 }
+                $this->recalculateInfluenceRadius();
                 return;
         }
 
@@ -123,6 +126,7 @@ class Galaxy
                 if (is_float($y)) {
                         $this->max_y = $y;
                 }
+                $this->recalculateInfluenceRadius();
                 return;
         }
 
@@ -131,7 +135,13 @@ class Galaxy
                 if (is_float($z)) {
                         $this->max_z = $z;
                 }
+                $this->recalculateInfluenceRadius();
                 return;
+        }
+
+        private function recalculateInfluenceRadius () : void
+        {
+                $this->influenceRadius = max($this->max_x, $this->max_y, $this->max_z) / 2.0;
         }
 
         public function setExpansionRate (float $x, float $y, float $z) : void
@@ -185,12 +195,45 @@ class Galaxy
                 }
                 else
                 {
+                        $this->last_location = $this->current_location;
                         $this->current_x = $x;
                         $this->current_y = $y;
                         $this->current_z = $z;
+                        $this->current_location = array('x' => $x, 'y' => $y, 'z' => $z);
                         Utility::write("Successfully set the center of the Galaxy to ($x, $y, $z)", LOG_NOTICE, L_CONSOLE);
                         return true;
                 }
+        }
+
+        public function getLocation () : array
+        {
+                return $this->current_location;
+        }
+
+        public function getInfluenceRadius () : float
+        {
+                return $this->influenceRadius;
+        }
+
+        public function translate (float $dx, float $dy, float $dz) : void
+        {
+                $this->last_location = $this->current_location;
+                $this->current_location['x'] += $dx;
+                $this->current_location['y'] += $dy;
+                $this->current_location['z'] += $dz;
+                $this->current_x = $this->current_location['x'];
+                $this->current_y = $this->current_location['y'];
+                $this->current_z = $this->current_location['z'];
+        }
+
+        public function distanceTo (Galaxy $other) : float
+        {
+                $a = $this->getLocation();
+                $b = $other->getLocation();
+                $dx = $a['x'] - $b['x'];
+                $dy = $a['y'] - $b['y'];
+                $dz = $a['z'] - $b['z'];
+                return sqrt(($dx * $dx) + ($dy * $dy) + ($dz * $dz));
         }
 
         public function getType () : string

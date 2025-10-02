@@ -93,6 +93,34 @@ the pool size—by default the simulator matches the detected CPU count. When mu
 support is unavailable the simulator automatically falls back to sequential stepping and
 logs a warning so operators can adjust their environment.
 
+### Macro-scale dynamics and transit objects
+
+Galaxies no longer drift as isolated islands. Every tick the universe samples nearby
+pairs and applies tidal nudges when their halos overlap, logging the interaction when the
+overlap is significant. Random events can now trigger direct galactic collisions that
+record chronicle entries on both participants, spawn debris plumes that travel between
+galaxies, and slightly displace their centers to model the ensuing gravitational chaos.
+
+Stars are likewise eligible for dramatic mass-loss events. When a primary sheds material
+the hosting system updates planetary velocities, chronicles the disturbance, and ejects
+worlds that can no longer remain bound. Those unbound bodies become `TransitObject`
+instances—ballistic travelers that retain their mass, radius, and lore while streaking
+toward interstellar space.
+
+Transit objects are tracked at two scales:
+
+- **Intergalactic wayfarers** emerge from collisions or exploratory launches and travel
+  between galaxy centers using randomly selected propulsion (solar sails, fusion torches,
+  antimatter wakes, or magnetic ramjets) and hull geometries (needle hulls, latticework
+  frames, etc.).
+- **Intersystem couriers** originate from system residents and carve new routes across
+  local space with propulsion types suitable for shorter hops (fusion torches, ion drives,
+  quantum spinnakers, and more).
+
+Each `TransitObject` updates its position, velocity, and descriptive text as it advances.
+Arrival events are chronicled on the destination galaxy or system so operators can see
+when debris, probes, or refugees reach their new homes.
+
 ### Relative timekeeping and population longevity
 
 Every planet now maintains its own temporal frame describing how quickly local seconds
