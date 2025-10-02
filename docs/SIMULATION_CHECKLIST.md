@@ -26,3 +26,4 @@
 - [x] Simulate galactic collisions and tidal interactions with recorded chronicles.
 - [x] Track intergalactic and intersystem transit objects, including propulsion and hull metadata.
 - [x] Model stellar mass-loss events that destabilize systems and eject unbound worlds.
+- [x] Harden the SQLite metadata store with busy retries so concurrent writers avoid `database is locked` failures.

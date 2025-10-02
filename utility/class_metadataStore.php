@@ -32,9 +32,40 @@ final class MetadataStore
                 }
                 $databasePath = $metadataRoot . DIRECTORY_SEPARATOR . self::DB_FILENAME;
                 $this->db = new SQLite3($databasePath);
+                if (method_exists($this->db, 'busyTimeout'))
+                {
+                        $this->db->busyTimeout(5000);
+                }
                 $this->db->exec('PRAGMA journal_mode=WAL');
                 $this->db->exec('PRAGMA synchronous=NORMAL');
                 $this->initializeSchema();
+        }
+
+        /**
+         * @return SQLite3Result|true|null
+         */
+        private function executeStatement(SQLite3Stmt $statement)
+        {
+                $attempts = 0;
+                $delay = 50000;
+                while (true)
+                {
+                        $result = @$statement->execute();
+                        if ($result !== false)
+                        {
+                                return $result;
+                        }
+                        $errorCode = $this->db->lastErrorCode();
+                        if (($errorCode === SQLITE3_BUSY || $errorCode === SQLITE3_LOCKED) && $attempts < 5)
+                        {
+                                usleep($delay);
+                                $delay *= 2;
+                                $attempts++;
+                                continue;
+                        }
+                        $message = $this->db->lastErrorMsg();
+                        throw new RuntimeException('Failed to execute metadata statement: ' . $message);
+                }
         }
 
         public static function instance() : MetadataStore
@@ -130,7 +161,11 @@ SQL;
                 $statement->bindValue(':entity_key', $entityKey, SQLITE3_TEXT);
                 $statement->bindValue(':content', $normalized, SQLITE3_TEXT);
                 $statement->bindValue(':created_at', microtime(true), SQLITE3_FLOAT);
-                $statement->execute();
+                $result = $this->executeStatement($statement);
+                if ($result instanceof SQLite3Result)
+                {
+                        $result->finalize();
+                }
                 $id = (int) $this->db->lastInsertRowID();
                 if ($id > 0)
                 {
@@ -155,7 +190,7 @@ SQL;
                         return null;
                 }
                 $statement->bindValue(':id', $id, SQLITE3_INTEGER);
-                $result = $statement->execute();
+                $result = $this->executeStatement($statement);
                 if (!($result instanceof SQLite3Result))
                 {
                         return null;
@@ -190,7 +225,7 @@ SQL;
                 $statement->bindValue(':content', $normalized, SQLITE3_TEXT);
                 $statement->bindValue(':created_at', microtime(true), SQLITE3_FLOAT);
                 $statement->bindValue(':id', $id, SQLITE3_INTEGER);
-                $result = $statement->execute();
+                $result = $this->executeStatement($statement);
                 if ($result instanceof SQLite3Result)
                 {
                         $result->finalize();
@@ -225,7 +260,11 @@ SQL;
                 $statement->bindValue(':content', $normalized, SQLITE3_TEXT);
                 $statement->bindValue(':timestamp', $timestamp, SQLITE3_FLOAT);
                 $statement->bindValue(':participants', $encodedParticipants ?: '[]', SQLITE3_TEXT);
-                $statement->execute();
+                $result = $this->executeStatement($statement);
+                if ($result instanceof SQLite3Result)
+                {
+                        $result->finalize();
+                }
                 $id = (int) $this->db->lastInsertRowID();
                 if ($id > 0)
                 {
@@ -255,7 +294,7 @@ SQL;
                         return null;
                 }
                 $statement->bindValue(':id', $id, SQLITE3_INTEGER);
-                $result = $statement->execute();
+                $result = $this->executeStatement($statement);
                 if (!($result instanceof SQLite3Result))
                 {
                         return null;
@@ -317,7 +356,11 @@ SQL;
                 {
                         $statement->bindValue(':id' . $index, intval($id), SQLITE3_INTEGER);
                 }
-                $statement->execute();
+                $result = $this->executeStatement($statement);
+                if ($result instanceof SQLite3Result)
+                {
+                        $result->finalize();
+                }
                 foreach ($ids as $id)
                 {
                         $key = intval($id);
