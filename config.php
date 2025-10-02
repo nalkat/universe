@@ -20,6 +20,7 @@ pcre
 pgsql
 posix
 sockets
+sqlite3
 DONE;
 
 $required_classes = <<<DONE
@@ -27,6 +28,7 @@ Telemetry,telemetry/class_telemetry.php
 Logger,logger/class_logger.php
 Timer,timer/class_timer.php
 Utility,utility/class_utility.php
+MetadataStore,utility/class_metadataStore.php
 LoreForge,utility/class_loreForge.php
 Universe,class_universe.php
 UniverseDaemon,class_universeDaemon.php

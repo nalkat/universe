@@ -1,6 +1,14 @@
 <?php // 7.3.0-dev
 class Person extends Life
 {
+        use MetadataBackedNarrative {
+                addChronicleEntry as private recordChronicleEntry;
+                importChronicle as private metadataImportChronicle;
+                getChronicle as private metadataGetChronicle;
+                setDescription as private metadataSetDescription;
+                getDescription as private metadataGetDescription;
+        }
+
         private $homeCountry;
         private $skills;
         private $profession;
@@ -17,9 +25,9 @@ class Person extends Life
         private $mortalityModel;
         private $resilienceExperience;
         private $calmAccumulator;
-        private $backstory;
+        private ?int $backstoryId;
         private $relationships;
-        private $chronicle;
+        protected int $chronicleLimit = 64;
         private $netWorth;
         private $coordinates;
         private $residenceCity;
@@ -43,9 +51,8 @@ class Person extends Life
                 $this->mortalityModel = strtolower(trim(strval($traits['mortality'] ?? 'finite')));
                 $this->resilienceExperience = 0.0;
                 $this->calmAccumulator = 0.0;
-                $this->backstory = '';
+                $this->backstoryId = null;
                 $this->relationships = array();
-                $this->chronicle = array();
                 $this->netWorth = max(0.0, floatval($traits['net_worth'] ?? 0.0));
                 $this->coordinates = null;
                 $this->residenceCity = null;
@@ -311,17 +318,26 @@ class Person extends Life
         public function setBackstory (string $backstory) : void
         {
                 $normalized = trim(strval($backstory));
-                $this->backstory = $normalized;
-                $this->setTrait('backstory', $normalized);
-                if ($normalized !== '')
+                if ($normalized === '')
                 {
-                        $this->addChronicleEntry('backstory', $normalized);
+                        $this->backstoryId = null;
+                        $this->setTrait('backstory', '');
+                        return;
                 }
+                $store = MetadataStore::instance();
+                $this->backstoryId = $store->storeDescription($normalized, 'PersonBackstory');
+                $this->setTrait('backstory', $normalized);
+                $this->recordChronicleEntry('backstory', $normalized, null, array($this->getName()));
         }
 
         public function getBackstory () : string
         {
-                return $this->backstory;
+                if ($this->backstoryId === null)
+                {
+                        return '';
+                }
+                $fetched = MetadataStore::instance()->fetchDescription($this->backstoryId);
+                return ($fetched === null) ? '' : $fetched;
         }
 
         public function addRelationship (string $role, string $name) : void
@@ -337,7 +353,8 @@ class Person extends Life
                 return $this->relationships;
         }
 
-        public function addChronicleEntry (string $type, string $text, ?float $timestamp = null, array $participants = array()) : void
+        public function addChronicleEntry (string $type, string $text, ?float $timestamp = null, array $participants = array())
+: void
         {
                 $normalized = trim(strval($text));
                 if ($normalized === '') return;
@@ -346,22 +363,14 @@ class Person extends Life
                 {
                         $participantList = array_map('strval', $participants);
                 }
-                $entry = array(
-                        'type' => Utility::cleanse_string($type === '' ? 'event' : $type),
-                        'text' => $normalized,
-                        'timestamp' => ($timestamp === null) ? $this->age : floatval($timestamp),
-                        'participants' => array_values(array_unique(array_merge(array($this->getName()), $participantList)))
-                );
-                $this->chronicle[] = $entry;
-                if (count($this->chronicle) > 64)
-                {
-                        $this->chronicle = array_slice($this->chronicle, -64);
-                }
+                $participantList = array_values(array_unique(array_merge(array($this->getName()), $participantList)));
+                $resolvedTimestamp = ($timestamp === null) ? $this->age : floatval($timestamp);
+                $this->recordChronicleEntry($type, $normalized, $resolvedTimestamp, $participantList);
         }
 
         public function getChronicle (?int $limit = null) : array
         {
-                $entries = $this->chronicle;
+                $entries = $this->metadataGetChronicle();
                 $entries[] = array(
                         'type' => 'status',
                         'text' => sprintf('%s is %.1f local years into their journey.', $this->getName(), $this->getAgeInYears()),

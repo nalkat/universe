@@ -1,6 +1,14 @@
 <?php // 7.3.0-dev
 class Country
 {
+        use MetadataBackedNarrative {
+                addChronicleEntry as private recordChronicleEntry;
+                importChronicle as private metadataImportChronicle;
+                getChronicle as private metadataGetChronicle;
+                setDescription as private metadataSetDescription;
+                getDescription as private metadataGetDescription;
+        }
+
         private $name;
         private $planet;
         private $infrastructure;
@@ -20,7 +28,7 @@ class Country
         private $adaptationLevel;
         private $adaptationAccumulator;
         private $culturalBackdrop;
-        private $chronicle;
+        protected int $chronicleLimit = 64;
         private $territory;
         private $cities;
 
@@ -50,7 +58,6 @@ class Country
                 $this->adaptationLevel = $this->sanitizeFraction($profile['adaptation'] ?? 0.0);
                 $this->adaptationAccumulator = 0.0;
                 $this->culturalBackdrop = array();
-                $this->chronicle = array();
                 $this->territory = $this->generateTerritoryProfile($profile['territory'] ?? null);
                 $this->cities = array();
                 $this->planet->registerCountry($this);
@@ -288,7 +295,7 @@ class Country
 
         public function getChronicle () : array
         {
-                return $this->chronicle;
+                return $this->metadataGetChronicle();
         }
 
         public function getCulturalBackdrop () : array
@@ -553,10 +560,11 @@ class Country
                         $city->setRadius($radius);
                         $city->setLocation($location);
                         $this->cities[$city->getName()] = $city;
-                        $this->chronicle[] = array(
-                                'type' => 'city_foundation',
-                                'text' => $city->getName() . ' chartered within ' . $this->name . '.',
-                                'timestamp' => microtime(true)
+                        $this->recordChronicleEntry(
+                                'city_foundation',
+                                $city->getName() . ' chartered within ' . $this->name . '.',
+                                microtime(true),
+                                array($city->getName())
                         );
                 }
         }
@@ -717,7 +725,7 @@ class Country
                         'hook' => trim(strval($climate['community_hook'] ?? '')),
                         'resource' => trim(strval($climate['resource_phrase'] ?? ''))
                 );
-                $this->chronicle = array();
+                $this->metadataImportChronicle(array());
                 $this->addChronicleEntry('foundation', $foundation);
                 if ($this->culturalBackdrop['hook'] !== '')
                 {
@@ -773,9 +781,9 @@ class Country
 
         private function extractRecentChronicleLine () : string
         {
-                for ($i = count($this->chronicle) - 1; $i >= 0; $i--)
+                $entries = array_reverse($this->metadataGetChronicle());
+                foreach ($entries as $entry)
                 {
-                        $entry = $this->chronicle[$i];
                         if (!is_array($entry)) continue;
                         $type = strval($entry['type'] ?? '');
                         if ($type === 'biography') continue;
@@ -830,23 +838,20 @@ class Country
                 $cleanType = Utility::cleanse_string($type);
                 $normalizedText = trim(strval($text));
                 if ($normalizedText === '') return;
-                $entry = array(
-                        'type' => ($cleanType === '') ? 'event' : $cleanType,
-                        'text' => $normalizedText,
-                        'participants' => array_values(array_unique(array_filter(array_map('strval', $participants)))),
-                        'timestamp' => microtime(true)
+                $participantList = array_values(array_unique(array_filter(array_map('strval', $participants))));
+                $timestamp = microtime(true);
+                $this->recordChronicleEntry(
+                        ($cleanType === '') ? 'event' : $cleanType,
+                        $normalizedText,
+                        $timestamp,
+                        $participantList
                 );
-                $this->chronicle[] = $entry;
-                if (count($this->chronicle) > 64)
-                {
-                        array_shift($this->chronicle);
-                }
-                foreach ($entry['participants'] as $participant)
+                foreach ($participantList as $participant)
                 {
                         $person = $this->findPersonByName($participant);
                         if ($person instanceof Person)
                         {
-                                $person->addChronicleEntry($entry['type'], $entry['text'], $entry['timestamp'], $entry['participants']);
+                                $person->addChronicleEntry(($cleanType === '') ? 'event' : $cleanType, $normalizedText, $timestamp, $participantList);
                         }
                 }
         }

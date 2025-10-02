@@ -48,6 +48,7 @@ PreRequisites::add_class("Logger","/logger/class_logger.php",DEP_REQUIRED);
 $required_classes = <<<DONE
 Logger,/logger/class_logger.php
 Utility,/utility/class_utility.php
+MetadataStore,/utility/class_metadataStore.php
 DONE;
 
 foreach (explode(PHP_EOL,$required_classes) as $required)

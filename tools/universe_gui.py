@@ -88,6 +88,7 @@ class UniverseGUI(tk.Tk):
         self.galaxies = tk.StringVar()
         self.systems_per_galaxy = tk.StringVar()
         self.planets_per_system = tk.StringVar()
+        self.workers = tk.StringVar(value=str(max(1, os.cpu_count() or 1)))
         self.tick_delay = tk.StringVar(value="2.0")
         self.catalog_refresh_seconds = tk.DoubleVar(value=10.0)
         self.auto_refresh = tk.BooleanVar(value=False)
@@ -100,8 +101,10 @@ class UniverseGUI(tk.Tk):
         self._catalog_refresh_job: int | None = None
         self._status_reset_job: int | None = None
 
-        self._output_queue: "queue.Queue[str]" = queue.Queue()
+        self._output_queue: queue.Queue[Any] = queue.Queue()
+        self._catalog_queue: queue.Queue[Any] = queue.Queue()
         self._worker: threading.Thread | None = None
+        self._catalog_worker: threading.Thread | None = None
         self._process: subprocess.Popen[str] | None = None
         self._paused: bool = False
 
@@ -166,6 +169,9 @@ class UniverseGUI(tk.Tk):
         ttk.Entry(generation_frame, textvariable=self.systems_per_galaxy, width=12).grid(row=1, column=1, sticky=tk.W, pady=4)
         ttk.Label(generation_frame, text="Planets/System:").grid(row=1, column=2, sticky=tk.W, padx=(12, 6), pady=4)
         ttk.Entry(generation_frame, textvariable=self.planets_per_system, width=12).grid(row=1, column=3, sticky=tk.W, pady=4)
+
+        ttk.Label(generation_frame, text="Workers:").grid(row=2, column=0, sticky=tk.W, padx=(8, 6), pady=4)
+        ttk.Entry(generation_frame, textvariable=self.workers, width=12).grid(row=2, column=1, sticky=tk.W, pady=4)
 
         button_frame = ttk.Frame(self)
         button_frame.pack(side=tk.TOP, fill=tk.X, padx=12, pady=(0, 12))
@@ -297,6 +303,7 @@ class UniverseGUI(tk.Tk):
         self.galaxies.set("")
         self.systems_per_galaxy.set("")
         self.planets_per_system.set("")
+        self.workers.set(str(max(1, os.cpu_count() or 1)))
         self.php_binary.set("php")
         self.socket_path.set(str(self.project_root / "runtime" / "universe.sock"))
         self.pid_file_path.set(str(self.project_root / "runtime" / "universe.pid"))
@@ -384,6 +391,8 @@ class UniverseGUI(tk.Tk):
             args.append(f"--systems-per-galaxy={systems}")
         if planets := self.planets_per_system.get().strip():
             args.append(f"--planets-per-system={planets}")
+        if workers := self.workers.get().strip():
+            args.append(f"--workers={workers}")
         return args
 
     def _execute_command(self, command: Iterable[str]) -> None:
@@ -442,11 +451,26 @@ class UniverseGUI(tk.Tk):
             self.after(100, self._drain_queue)
 
     def load_catalog(self, silent: bool = False) -> None:
+        if self._catalog_worker is not None and self._catalog_worker.is_alive():
+            if not silent:
+                messagebox.showinfo(
+                    "Universe Simulator",
+                    "A catalog load is already in progress.",
+                )
+            return
         command = self._build_catalog_command()
         if command is None:
             return
         if not silent:
             self._append_output("$ " + " ".join(command) + "\n")
+        self._catalog_worker = threading.Thread(
+            target=self._run_catalog_command, args=(command, silent), daemon=True
+        )
+        self._catalog_worker.start()
+        self.after(100, self._drain_catalog_queue)
+        self._update_status("Loading catalog...")
+
+    def _run_catalog_command(self, command: List[str], silent: bool) -> None:
         try:
             result = subprocess.run(
                 command,
@@ -456,18 +480,21 @@ class UniverseGUI(tk.Tk):
                 text=True,
                 cwd=self.project_root,
             )
+            stdout = result.stdout or ""
+            stderr = result.stderr or ""
+            self._catalog_queue.put(("success", stdout, stderr, silent))
         except subprocess.CalledProcessError as exc:
-            message = exc.stderr.strip() or str(exc)
-            if silent:
-                self._append_output(f"Catalog command failed: {message}\n")
-            else:
-                messagebox.showerror("Universe Simulator", f"Catalog command failed: {message}")
-            return
+            message = (exc.stderr or "").strip() or str(exc)
+            stdout = exc.stdout or ""
+            stderr = exc.stderr or ""
+            self._catalog_queue.put(("error", message, stdout, stderr, silent))
+        except Exception as exc:
+            self._catalog_queue.put(("exception", str(exc), silent))
 
-        output = (result.stdout or "").strip()
-        if result.stderr and not silent:
-            self._append_output(result.stderr)
-
+    def _handle_catalog_success(self, stdout: str, stderr: str, silent: bool) -> None:
+        output = stdout.strip()
+        if stderr and not silent:
+            self._append_output(stderr)
         data = self._parse_catalog_output(output)
         if data is None:
             preview = output[:500]
@@ -480,13 +507,50 @@ class UniverseGUI(tk.Tk):
                 )
             if preview:
                 self._append_output("Catalog stdout preview:\n" + preview + "\n")
-            if result.stderr:
-                self._append_output("Catalog stderr:\n" + result.stderr + "\n")
+            if stderr:
+                self._append_output("Catalog stderr:\n" + stderr + "\n")
+            self._update_status("Catalog error", auto_reset=True)
             return
         self.catalog_data = data
         self._populate_catalog_tree(data)
         if not silent:
             self._append_output("Catalog loaded.\n")
+        self._update_status("Catalog loaded", auto_reset=True)
+
+    def _drain_catalog_queue(self) -> None:
+        while True:
+            try:
+                item = self._catalog_queue.get_nowait()
+            except queue.Empty:
+                break
+            tag = item[0]
+            if tag == "success":
+                _, stdout, stderr, silent = item
+                self._handle_catalog_success(stdout, stderr, silent)
+            elif tag == "error":
+                _, message, stdout, stderr, silent = item
+                if silent:
+                    self._append_output(f"Catalog command failed: {message}\n")
+                else:
+                    messagebox.showerror("Universe Simulator", f"Catalog command failed: {message}")
+                preview = (stdout or "")[:500]
+                if preview:
+                    self._append_output("Catalog stdout preview:\n" + preview + "\n")
+                if stderr:
+                    self._append_output("Catalog stderr:\n" + stderr + "\n")
+                self._update_status("Catalog error", auto_reset=True)
+            elif tag == "exception":
+                _, message, silent = item
+                if silent:
+                    self._append_output(f"Catalog command failed: {message}\n")
+                else:
+                    messagebox.showerror("Universe Simulator", f"Catalog command failed: {message}")
+                self._update_status("Catalog error", auto_reset=True)
+        worker = self._catalog_worker
+        if worker is not None and worker.is_alive():
+            self.after(100, self._drain_catalog_queue)
+        else:
+            self._catalog_worker = None
 
     def _build_catalog_command(self) -> List[str] | None:
         binary = self.php_binary.get().strip() or "php"
@@ -504,6 +568,8 @@ class UniverseGUI(tk.Tk):
             args.append(f"--systems-per-galaxy={systems}")
         if planets := self.planets_per_system.get().strip():
             args.append(f"--planets-per-system={planets}")
+        if workers := self.workers.get().strip():
+            args.append(f"--workers={workers}")
         return args
 
     def _parse_catalog_output(self, output: str) -> Dict[str, Any] | None:

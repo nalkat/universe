@@ -21,3 +21,4 @@
 - [ ] Apply a bespoke visual theme and artwork pipeline for the desktop control panel.
 - [ ] Stress-test habitat experimentation loops across multi-season environmental scenarios.
 - [x] Surface biosphere composition summaries and economic telemetry throughout the catalog hierarchy.
+- [x] Parallelize galaxy advancement with a configurable worker pool to leverage multi-core hosts.

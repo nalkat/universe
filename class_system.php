@@ -2,6 +2,14 @@
 
 class System
 {
+        use MetadataBackedNarrative {
+                addChronicleEntry as private recordChronicleEntry;
+                importChronicle as private metadataImportChronicle;
+                getChronicle as private metadataGetChronicle;
+                setDescription as private metadataSetDescription;
+                getDescription as private metadataGetDescription;
+        }
+
         public const PROPAGATION_ANALYTIC = 'analytic';
         public const PROPAGATION_NUMERICAL = 'numerical';
 
@@ -14,8 +22,7 @@ class System
         private $gravitySofteningLength;
         private $eventLog;
         private $eventLogLimit;
-        private $description;
-        private $chronicle;
+        protected int $chronicleLimit = 64;
 
         public function __construct (string $name, ?Star $primaryStar = null)
         {
@@ -28,8 +35,7 @@ class System
                 $this->gravitySofteningLength = floatval(0);
                 $this->eventLog = array();
                 $this->eventLogLimit = 100;
-                $this->description = 'Uncharted system awaiting observational data.';
-                $this->chronicle = array();
+                $this->setDescription('Uncharted system awaiting observational data.');
                 if ($primaryStar instanceof Star)
                 {
                         $this->setPrimaryStar($primaryStar);
@@ -540,54 +546,28 @@ class System
 
         public function setDescription (string $description) : void
         {
-                $normalized = trim(strval($description));
-                if ($normalized === '') return;
-                $this->description = $normalized;
+                $this->metadataSetDescription($description);
         }
 
         public function getDescription () : string
         {
-                return $this->description;
+                return $this->metadataGetDescription();
         }
 
         public function addChronicleEntry (string $type, string $text, ?float $timestamp = null, array $participants = array()) : void
         {
-                $normalized = trim(strval($text));
-                if ($normalized === '') return;
-                $entry = array(
-                        'type' => Utility::cleanse_string($type === '' ? 'event' : $type),
-                        'text' => $normalized,
-                        'timestamp' => ($timestamp === null) ? $this->age : floatval($timestamp),
-                        'participants' => array_values(array_unique(array_map('strval', $participants)))
-                );
-                $this->chronicle[] = $entry;
-                if (count($this->chronicle) > 64)
-                {
-                        $this->chronicle = array_slice($this->chronicle, -64);
-                }
+                $resolvedTimestamp = ($timestamp === null) ? $this->age : floatval($timestamp);
+                $this->recordChronicleEntry($type, $text, $resolvedTimestamp, $participants);
         }
 
         public function importChronicle (array $entries) : void
         {
-                $this->chronicle = array();
-                foreach ($entries as $entry)
-                {
-                        if (!is_array($entry)) continue;
-                        $this->addChronicleEntry(
-                                strval($entry['type'] ?? 'event'),
-                                strval($entry['text'] ?? ''),
-                                isset($entry['timestamp']) ? floatval($entry['timestamp']) : null,
-                                is_array($entry['participants'] ?? null) ? $entry['participants'] : array()
-                        );
-                }
+                $this->metadataImportChronicle($entries);
         }
 
         public function getChronicle (?int $limit = null) : array
         {
-                if ($limit === null) return $this->chronicle;
-                $limit = max(0, intval($limit));
-                if ($limit === 0) return array();
-                return array_slice($this->chronicle, -$limit);
+                return $this->metadataGetChronicle($limit);
         }
 }
 ?>

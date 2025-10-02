@@ -53,6 +53,8 @@ class Universe
 	private $eventTimer;			// timer object to track events
 	private $createTime;			// duration until a creation event ocurrs
 	private $createTimer;			// timer object to track creations
+	private $workerCount;
+	private $parallelWarningEmitted;
 
 	public static function init () : void
 	{
@@ -272,7 +274,24 @@ class Universe
 		$this->ticks = 0;
 		$this->tickEvent = false;
 		$this->tickEvents = array();
+		$this->workerCount = 1;
+		$this->parallelWarningEmitted = false;
+
 	}
+
+        public function setWorkerCount (int $workers) : void
+        {
+                $this->workerCount = max(1, intval($workers));
+                if ($this->workerCount === 1)
+                {
+                        $this->parallelWarningEmitted = false;
+                }
+        }
+
+        public function getWorkerCount () : int
+        {
+                return max(1, intval($this->workerCount));
+        }
 
 	public function getTicks() : float {
 		return (floatval($this->ticks));
@@ -655,6 +674,10 @@ class Universe
         public function advance (float $deltaTime = 1.0) : void
         {
                 $this->tick();
+                if ($this->attemptParallelAdvance($deltaTime))
+                {
+                        return;
+                }
                 foreach ($this->galaxies as $galaxy)
                 {
                         if ($galaxy instanceof Galaxy)
@@ -662,6 +685,129 @@ class Universe
                                 $galaxy->tick($deltaTime);
                         }
                 }
+        }
+
+        private function attemptParallelAdvance (float $deltaTime) : bool
+        {
+                $workers = $this->getWorkerCount();
+                if ($workers <= 1)
+                {
+                        return false;
+                }
+                if (count($this->galaxies) <= 1)
+                {
+                        return false;
+                }
+                if (!function_exists('\parallel\run'))
+                {
+                        if (!$this->parallelWarningEmitted)
+                        {
+                                Utility::write('parallel extension not available; running sequentially.', LOG_WARNING, L_CONSOLE);
+                                $this->parallelWarningEmitted = true;
+                        }
+                        return false;
+                }
+
+                $payloads = array();
+                foreach ($this->galaxies as $name => $galaxy)
+                {
+                        if (!($galaxy instanceof Galaxy))
+                        {
+                                continue;
+                        }
+                        try
+                        {
+                                $payloads[$name] = serialize($galaxy);
+                        }
+                        catch (\Throwable $throwable)
+                        {
+                                Utility::write('Failed to serialize galaxy ' . $name . ': ' . $throwable->getMessage(), LOG_WARNING, L_CONSOLE);
+                                return false;
+                        }
+                }
+                if (count($payloads) <= 1)
+                {
+                        return false;
+                }
+
+                $slice = max(1, (int) ceil(count($payloads) / min($workers, count($payloads))));
+                $chunks = array_chunk($payloads, $slice, true);
+                $futures = array();
+                foreach ($chunks as $chunk)
+                {
+                        $futures[] = \parallel\run(function (array $payload, float $delta, string $root) {
+                                require_once $root . '/config.php';
+                                $results = array();
+                                foreach ($payload as $name => $serialized)
+                                {
+                                        try
+                                        {
+                                                $galaxy = unserialize($serialized);
+                                        }
+                                        catch (\Throwable)
+                                        {
+                                                $galaxy = null;
+                                        }
+                                        if ($galaxy instanceof Galaxy)
+                                        {
+                                                $galaxy->tick($delta);
+                                                try
+                                                {
+                                                        $results[$name] = serialize($galaxy);
+                                                }
+                                                catch (\Throwable)
+                                                {
+                                                        // Skip entries we cannot marshal back to the main runtime.
+                                                }
+                                        }
+                                }
+                                return $results;
+                        }, array($chunk, $deltaTime, PHPROOT));
+                }
+
+                $updated = array();
+                $hadFailure = false;
+                foreach ($futures as $future)
+                {
+                        try
+                        {
+                                $result = $future->value();
+                                if (is_array($result))
+                                {
+                                        $updated = array_merge($updated, $result);
+                                }
+                        }
+                        catch (\Throwable $throwable)
+                        {
+                                Utility::write('Parallel advance failed: ' . $throwable->getMessage(), LOG_WARNING, L_CONSOLE);
+                                $hadFailure = true;
+                        }
+                }
+
+                if ($hadFailure)
+                {
+                        return false;
+                }
+
+                foreach ($updated as $name => $serialized)
+                {
+                        try
+                        {
+                                $galaxy = unserialize($serialized);
+                        }
+                        catch (\Throwable $throwable)
+                        {
+                                Utility::write('Failed to hydrate galaxy ' . $name . ': ' . $throwable->getMessage(), LOG_WARNING, L_CONSOLE);
+                                continue;
+                        }
+                        if ($galaxy instanceof Galaxy)
+                        {
+                                $this->galaxies[$name] = $galaxy;
+                                $this->registerGalaxy($galaxy);
+                        }
+                }
+
+                return !empty($updated);
         }
 
         public function createGalaxy (string $name, ?float $x = null, ?float $y = null, ?float $z = null) : bool

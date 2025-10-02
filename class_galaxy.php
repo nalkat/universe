@@ -1,6 +1,8 @@
 <?php // 7.3.0-dev
 class Galaxy
 {
+        use MetadataBackedNarrative;
+
         // properties common to all instanced galaxies:
         public static $numSystems;
         public static $numObjects;
@@ -36,8 +38,7 @@ class Galaxy
         private $ticks;
         private $tickEvents;
 
-        private $description;
-        private $chronicle;
+        protected int $chronicleLimit = 48;
 
         private $randomEventChance;
 
@@ -97,8 +98,7 @@ class Galaxy
                 $this->eventTimer = new Timer();
                 $this->createTime = null;
                 $this->createTimer = new Timer();
-                $this->description = 'An uncharted galaxy awaiting its first survey.';
-                $this->chronicle = array();
+                $this->setDescription('An uncharted galaxy awaiting its first survey.');
         }
 
         public function setType (string $type) : bool
@@ -311,58 +311,6 @@ class Galaxy
                         $system->tick($deltaTime);
                 }
                 $this->age += max(0.0, $deltaTime);
-        }
-
-        public function setDescription (string $description) : void
-        {
-                $normalized = trim(strval($description));
-                if ($normalized === '') return;
-                $this->description = $normalized;
-        }
-
-        public function getDescription () : string
-        {
-                return $this->description;
-        }
-
-        public function addChronicleEntry (string $type, string $text, ?float $timestamp = null, array $participants = array()) : void
-        {
-                $normalized = trim(strval($text));
-                if ($normalized === '') return;
-                $entry = array(
-                        'type' => Utility::cleanse_string($type === '' ? 'event' : $type),
-                        'text' => $normalized,
-                        'timestamp' => ($timestamp === null) ? microtime(true) : floatval($timestamp),
-                        'participants' => array_values(array_unique(array_map('strval', $participants)))
-                );
-                $this->chronicle[] = $entry;
-                if (count($this->chronicle) > 48)
-                {
-                        $this->chronicle = array_slice($this->chronicle, -48);
-                }
-        }
-
-        public function importChronicle (array $entries) : void
-        {
-                $this->chronicle = array();
-                foreach ($entries as $entry)
-                {
-                        if (!is_array($entry)) continue;
-                        $this->addChronicleEntry(
-                                strval($entry['type'] ?? 'event'),
-                                strval($entry['text'] ?? ''),
-                                isset($entry['timestamp']) ? floatval($entry['timestamp']) : null,
-                                is_array($entry['participants'] ?? null) ? $entry['participants'] : array()
-                        );
-                }
-        }
-
-        public function getChronicle (?int $limit = null) : array
-        {
-                if ($limit === null) return $this->chronicle;
-                $limit = max(0, $limit);
-                if ($limit === 0) return array();
-                return array_slice($this->chronicle, -$limit);
         }
 
         public function getBounds () : array

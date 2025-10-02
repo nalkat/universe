@@ -2,6 +2,8 @@
 
 class SystemObject
 {
+        use MetadataBackedNarrative;
+
         public const GRAVITATIONAL_CONSTANT = 6.67430E-11;
 
         protected $name;
@@ -11,12 +13,11 @@ class SystemObject
         protected $position;
         protected $velocity;
         protected $metadata;
-        protected $description;
         protected $parentSystem;
         protected $age;
         protected $destroyed;
         protected $destructionReason;
-        protected $chronicle;
+        protected int $chronicleLimit = 48;
 
         public function __construct (string $name, float $mass = 0.0, float $radius = 0.0, ?array $position = null, ?array $velocity = null)
         {
@@ -27,12 +28,10 @@ class SystemObject
                 $this->position = $this->sanitizeVector($position);
                 $this->velocity = $this->sanitizeVector($velocity);
                 $this->metadata = array();
-                $this->description = '';
                 $this->parentSystem = null;
                 $this->age = floatval(0);
                 $this->destroyed = false;
                 $this->destructionReason = null;
-                $this->chronicle = array();
                 $this->addChronicleEntry('formation', sprintf('%s entered the records with mass %.2e kg.', $this->name, $this->mass));
         }
 
@@ -202,46 +201,6 @@ class SystemObject
                 return $this->destroyed;
         }
 
-        public function addChronicleEntry (string $type, string $text, ?float $timestamp = null, array $participants = array()) : void
-        {
-                $normalized = trim(strval($text));
-                if ($normalized === '') return;
-                $entry = array(
-                        'type' => Utility::cleanse_string($type === '' ? 'event' : $type),
-                        'text' => $normalized,
-                        'timestamp' => ($timestamp === null) ? $this->age : floatval($timestamp),
-                        'participants' => array_values(array_unique(array_map('strval', $participants)))
-                );
-                $this->chronicle[] = $entry;
-                if (count($this->chronicle) > 48)
-                {
-                        $this->chronicle = array_slice($this->chronicle, -48);
-                }
-        }
-
-        public function importChronicle (array $entries) : void
-        {
-                $this->chronicle = array();
-                foreach ($entries as $entry)
-                {
-                        if (!is_array($entry)) continue;
-                        $this->addChronicleEntry(
-                                strval($entry['type'] ?? 'event'),
-                                strval($entry['text'] ?? ''),
-                                isset($entry['timestamp']) ? floatval($entry['timestamp']) : null,
-                                is_array($entry['participants'] ?? null) ? $entry['participants'] : array()
-                        );
-                }
-        }
-
-        public function getChronicle (?int $limit = null) : array
-        {
-                if ($limit === null) return $this->chronicle;
-                $limit = max(0, intval($limit));
-                if ($limit === 0) return array();
-                return array_slice($this->chronicle, -$limit);
-        }
-
         public function destroy (string $reason = 'unknown') : void
         {
                 if ($this->destroyed) return;
@@ -268,28 +227,18 @@ class SystemObject
                 return sqrt(($dx * $dx) + ($dy * $dy) + ($dz * $dz));
         }
 
-        public function setDescription (string $description) : void
-        {
-                $normalized = trim(strval($description));
-                $this->description = ($normalized === '') ? '' : $normalized;
-        }
-
-        public function getDescription () : string
-        {
-                return $this->description;
-        }
-
         public function appendDescription (string $fragment) : void
         {
                 $fragment = trim(strval($fragment));
                 if ($fragment === '') return;
-                if ($this->description === '')
+                $current = $this->getDescription();
+                if ($current === '')
                 {
-                        $this->description = $fragment;
+                        $this->setDescription($fragment);
                         return;
                 }
-                $delimiter = (substr($this->description, -1) === '.') ? ' ' : '. ';
-                $this->description .= $delimiter . $fragment;
+                $delimiter = (substr($current, -1) === '.') ? ' ' : '. ';
+                $this->setDescription($current . $delimiter . $fragment);
         }
 
         public function getGravitationalParameter () : float

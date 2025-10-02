@@ -52,6 +52,7 @@ Use these command-line options with either `start` or `run-once` to steer the ge
 - `--galaxies=<int>` – override the number of galaxies created (defaults to 12–20).
 - `--systems-per-galaxy=<int>` – set the baseline system count per galaxy (defaults to 14 with randomized variance).
 - `--planets-per-system=<int>` – set the baseline planet count per system (defaults to 20 with randomized variance).
+- `--workers=<int|auto>` – configure how many PHP workers advance galaxies in parallel (defaults to auto-detected CPU count).
 
 The runtime summary now reports each planet's habitability class (`lush`, `temperate`,
 `marginal`, `hostile`, or `barren`) alongside the two dominant environmental factors that
@@ -76,6 +77,21 @@ compile founding lore and recent events; and every person now carries a backstor
 references mentors, rivals, and shared community history. Access these strings via
 `SystemObject::getDescription()`, `Country::getDescription()`, and `Person::getBackstory()`
 to differentiate entries in upcoming UI layers.
+
+All of this prose now lives in a repository-local SQLite cache managed by
+`MetadataStore`. Descriptions and chronicle entries are stored once in
+`runtime/meta/metadata.sqlite` and referenced by ID, dramatically reducing in-memory
+pressure while letting parallel workers share the same lore without additional wiring.
+The store automatically deduplicates entries, enforces chronicle limits, and keeps
+description fetches hot via an in-process cache.
+
+### Parallel stepping and SMP utilization
+
+Universe ticks now fan out across multiple worker threads when the PHP `parallel`
+extension is available. Use `--workers=<int|auto>` (or the GUI's Workers field) to set
+the pool size—by default the simulator matches the detected CPU count. When multi-core
+support is unavailable the simulator automatically falls back to sequential stepping and
+logs a warning so operators can adjust their environment.
 
 ### Relative timekeeping and population longevity
 
@@ -136,6 +152,9 @@ view so operators can iterate quickly while we work toward a fully art-directed 
 - **Catalog search** – A search box filters the hierarchy by name or summary, helping you
   jump directly to the systems, planets, or citizens you're interested in without
   manually expanding each branch.
+- **Async catalog loading** – Catalog requests now run in the background with inline
+  status updates, eliminating GUI freezes when fetching massive universes or when the
+  PHP CLI emits diagnostic output alongside JSON.
 
 ## Matter and ecology scaffolding
 

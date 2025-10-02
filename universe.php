@@ -84,6 +84,13 @@ Universe::setExpansionRate (2.47, 1.22, 4.0);
 Universe::setLocation (5000,5000,5000);
 
 $universe = new Universe("Marstellar", Universe::getMaxX(), Universe::getMaxY(), Universe::getMaxZ());
+$requestedWorkers = universe_resolve_worker_count($options);
+if ($requestedWorkers > 1 && !function_exists('\\parallel\\run'))
+{
+        Utility::write('parallel extension not available; reducing worker count to 1.', LOG_WARNING, L_CONSOLE);
+        $requestedWorkers = 1;
+}
+$universe->setWorkerCount($requestedWorkers);
 $simulator = new UniverseSimulator($universe);
 
 $blueprintOptions = $options;
@@ -136,6 +143,94 @@ function universe_parse_options (array $arguments) : array
                 $options[$key] = $value;
         }
         return $options;
+}
+
+function universe_detect_cpu_count () : int
+{
+        $env = getenv('NUMBER_OF_PROCESSORS');
+        if ($env !== false)
+        {
+                $count = intval($env);
+                if ($count > 0)
+                {
+                        return $count;
+                }
+        }
+
+        $statPath = '/proc/stat';
+        if (is_readable($statPath))
+        {
+                $contents = @file_get_contents($statPath);
+                if ($contents !== false)
+                {
+                        if (preg_match_all('/^cpu[0-9]+\s/m', $contents, $matches))
+                        {
+                                $count = count($matches[0]);
+                                if ($count > 0)
+                                {
+                                        return $count;
+                                }
+                        }
+                }
+        }
+
+        $cpuInfoPath = '/proc/cpuinfo';
+        if (is_readable($cpuInfoPath))
+        {
+                $contents = @file_get_contents($cpuInfoPath);
+                if ($contents !== false)
+                {
+                        if (preg_match_all('/^processor\s*:/m', $contents, $matches))
+                        {
+                                $count = count($matches[0]);
+                                if ($count > 0)
+                                {
+                                        return $count;
+                                }
+                        }
+                }
+        }
+
+        return 1;
+}
+
+function universe_resolve_worker_count (array $options) : int
+{
+        $default = max(1, universe_detect_cpu_count());
+        $value = null;
+        foreach (array('workers', 'worker-count', 'worker') as $key)
+        {
+                if (isset($options[$key]))
+                {
+                        $value = $options[$key];
+                        break;
+                }
+        }
+        if ($value === null)
+        {
+                return $default;
+        }
+
+        $raw = strtolower(trim(strval($value)));
+        if ($raw === '' || $raw === 'auto' || $raw === 'default')
+        {
+                return $default;
+        }
+
+        if (!is_numeric($raw))
+        {
+                Utility::write('Unrecognized worker count "' . $value . '", using ' . $default . '.', LOG_WARNING, L_CONSOLE);
+                return $default;
+        }
+
+        $workers = intval($raw);
+        if ($workers <= 0)
+        {
+                Utility::write('Worker count must be positive; using ' . $default . '.', LOG_WARNING, L_CONSOLE);
+                return $default;
+        }
+
+        return $workers;
 }
 
 function universe_initialize_rng (?int $seed = null) : int
@@ -941,8 +1036,8 @@ function universe_print_summary (Universe $universe) : void
 function universe_print_usage () : void
 {
         echo "Universe simulator usage:" . PHP_EOL;
-        echo "  php universe.php start [--delta=3600] [--interval=1] [--auto-steps=1] [--socket=path] [--pid-file=path] [--no-daemonize]" . PHP_EOL;
-        echo "  php universe.php run-once [--steps=10] [--delta=3600] [--tick-delay=0]" . PHP_EOL;
+        echo "  php universe.php start [--delta=3600] [--interval=1] [--auto-steps=1] [--socket=path] [--pid-file=path] [--no-daemonize] [--workers=auto]" . PHP_EOL;
+        echo "  php universe.php run-once [--steps=10] [--delta=3600] [--tick-delay=0] [--workers=auto]" . PHP_EOL;
         echo "  php universe.php catalog [--format=json] [--pretty] [--people-limit=50] [--chronicle-limit=12]" . PHP_EOL;
         echo "  php universe.php --help" . PHP_EOL;
         echo "  php universe.php help" . PHP_EOL;
@@ -951,6 +1046,7 @@ function universe_print_usage () : void
         echo "  --galaxies=<int>            Override the number of galaxies generated" . PHP_EOL;
         echo "  --systems-per-galaxy=<int>  Target system count per galaxy before variance" . PHP_EOL;
         echo "  --planets-per-system=<int>  Target planet count per system before variance" . PHP_EOL;
+        echo "  --workers=<int|auto>        Number of worker threads to advance galaxies in parallel (default auto)" . PHP_EOL;
         echo PHP_EOL . "Catalog options:" . PHP_EOL;
         echo "  --people-limit=<int>        Maximum number of citizens per country to include (default 50)" . PHP_EOL;
         echo "  --chronicle-limit=<int>     Maximum chronicle entries to retain per object (default 12)" . PHP_EOL;
