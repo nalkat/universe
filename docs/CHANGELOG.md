@@ -19,6 +19,8 @@
 - Pruned expired chronicle rows when narrative handles exceed retention limits so massive
   run-once sessions no longer leave the metadata database bloated or stall subsequent
   catalog loads.
+- Bound PostgreSQL media payloads as binary large objects so catalog imagery persists
+  without triggering invalid UTF-8 errors when VisualForge stores PNG assets.
 - Extended the metadata store with generator, prompt, attribute, and resolution columns so
   exported images now carry provenance and can be filtered or regenerated without manual
   bookkeeping.

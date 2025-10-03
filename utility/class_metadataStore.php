@@ -226,8 +226,29 @@ final class MetadataStore
                         throw new \RuntimeException('Failed to prepare metadata statement.');
                 }
 
-                return $this->withRetry(function () use ($statement, $parameters) : \PDOStatement {
-                        if (!$statement->execute($parameters))
+                $typedParameters = array();
+                $simpleParameters = array();
+                foreach ($parameters as $key => $value)
+                {
+                        if (is_array($value) && array_key_exists('value', $value))
+                        {
+                                $typedParameters[$key] = $value;
+                                continue;
+                        }
+
+                        $simpleParameters[$key] = $value;
+                }
+
+                foreach ($typedParameters as $key => $payload)
+                {
+                        $paramKey = is_int($key) ? $key + 1 : $key;
+                        $paramType = is_int($payload['type'] ?? null) ? $payload['type'] : \PDO::PARAM_STR;
+                        $statement->bindValue($paramKey, $payload['value'], $paramType);
+                }
+
+                return $this->withRetry(function () use ($statement, $simpleParameters) : \PDOStatement {
+                        $result = empty($simpleParameters) ? $statement->execute() : $statement->execute($simpleParameters);
+                        if ($result === false)
                         {
                                 throw new \RuntimeException('Failed to execute metadata statement.');
                         }
@@ -565,7 +586,9 @@ final class MetadataStore
                         ':label' => $normalizedLabel,
                         ':media_type' => $mediaType,
                         ':mime_type' => $mimeType,
-                        ':content' => $content,
+                        ':content' => ($this->driver === self::DRIVER_POSTGRES)
+                                ? array('value' => $content, 'type' => \PDO::PARAM_LOB)
+                                : $content,
                         ':created_at' => $now,
                 );
 
