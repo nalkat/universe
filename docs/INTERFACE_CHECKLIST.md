@@ -16,3 +16,5 @@
 - [x] Toggle console and control panel launchers to double as close buttons when their windows are visible.
 - [x] Surface portrait provenance (generator, prompt, resolution) inside the Universe Browser detail panes.
 - [x] Ship a command-line artisan that can generate or import portraits outside of VisualForge.
+- [x] Animate the visual canvas with per-tick dynamics for the selected catalog object and its nearby bodies.
+- [x] Expose PostgreSQL/SQLite selection in the control panel and update the metadata configuration automatically.

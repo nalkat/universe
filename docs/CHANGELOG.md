@@ -1,6 +1,19 @@
 # Change Log
 
 ## [Unreleased]
+- Exported dynamics snapshots (position, velocity, nearby bodies, and tick cadence) for
+  stars, planets, and systems so catalog consumers can visualize orbital motion without
+  querying the simulation directly.
+- Animated the GUI visual tab with per-tick motion for the selected object and its
+  neighbors, rendering velocity vectors and trails while keeping the rest of the catalog
+  static for smooth browsing.
+- Calibrated the dynamics renderer to plot per-tick displacement arrows with viewport-aware
+  clamping so both slow and fast bodies remain legible on the canvas.
+- Added metadata database controls to the control panel that toggle between PostgreSQL
+  and SQLite backends, updating `config/metadata.php` before each run to keep CLI and GUI
+  sessions aligned.
+- Surfaced GUI error messaging when metadata configuration writes fail so operators know
+  when database selection changes were not persisted.
 - Pruned expired chronicle rows when narrative handles exceed retention limits so massive
   run-once sessions no longer leave the metadata database bloated or stall subsequent
   catalog loads.

@@ -194,6 +194,12 @@ main browser remains responsive.
 - **Async catalog loading** – Catalog requests now run in the background with inline
   status updates, eliminating GUI freezes when fetching massive universes or when the
   PHP CLI emits diagnostic output alongside JSON.
+- **Live dynamics viewer** – The Visual tab animates orbital motion for the selected
+  object, plotting velocity vectors and nearby bodies each tick without repainting the
+  entire catalog tree so you can study systems in motion at leisure.
+- **Metadata configuration controls** – The detached control panel now lets you choose
+  between the bundled SQLite cache and a PostgreSQL metadata store, updating
+  `config/metadata.php` before every run so GUI and CLI sessions stay in sync.
 
 ### Portrait generation pipeline
 
@@ -201,7 +207,9 @@ main browser remains responsive.
   generator responsible for each image (`VisualForge`, `tools/artisan.py`, or custom
   pipelines), the originating prompt, output resolution, creation timestamp, and any
   supplemental attributes. Catalog exports surface these fields alongside base64 image
-  data so UI layers can display provenance without additional lookups.
+  data so UI layers can display provenance without additional lookups. The control panel
+  can switch between SQLite and PostgreSQL backends on demand, keeping the portrait
+  cache consistent across workflows.
 - **`tools/artisan.py`** – A new Python helper that prefers Hugging Face diffusers
   pipelines to synthesize entity portraits. When diffusers or GPU acceleration are
   unavailable the tool falls back to a deterministic gradient renderer so operators can

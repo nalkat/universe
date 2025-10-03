@@ -1187,6 +1187,136 @@ function universe_generate_symbol (string $name, array &$used) : string
         return $candidate;
 }
 
+function universe_catalog_object_category (SystemObject $object) : string
+{
+        if ($object instanceof Planet)
+        {
+                return 'planet';
+        }
+        if ($object instanceof Star)
+        {
+                return 'star';
+        }
+        if ($object instanceof TransitObject)
+        {
+                return 'transit';
+        }
+        $type = strtolower($object->getType());
+        if ($type !== '')
+        {
+                return $type;
+        }
+        return 'object';
+}
+
+function universe_catalog_vector (array $vector) : array
+{
+        return array(
+                'x' => floatval($vector['x'] ?? 0.0),
+                'y' => floatval($vector['y'] ?? 0.0),
+                'z' => floatval($vector['z'] ?? 0.0)
+        );
+}
+
+function universe_vector_distance (array $a, array $b) : float
+{
+        $ax = floatval($a['x'] ?? 0.0);
+        $ay = floatval($a['y'] ?? 0.0);
+        $az = floatval($a['z'] ?? 0.0);
+        $bx = floatval($b['x'] ?? 0.0);
+        $by = floatval($b['y'] ?? 0.0);
+        $bz = floatval($b['z'] ?? 0.0);
+
+        $dx = $ax - $bx;
+        $dy = $ay - $by;
+        $dz = $az - $bz;
+
+        return sqrt(($dx * $dx) + ($dy * $dy) + ($dz * $dz));
+}
+
+function universe_catalog_dynamics (SystemObject $object, int $nearbyLimit = 3) : array
+{
+        $snapshot = array(
+                'position' => universe_catalog_vector($object->getPosition()),
+                'velocity' => universe_catalog_vector($object->getVelocity()),
+                'speed' => $object->getSpeed(),
+                'mass' => $object->getMass(),
+                'radius' => $object->getRadius(),
+        );
+
+        $system = $object->getParentSystem();
+        if ($system instanceof System)
+        {
+                $tick = $system->getTimeStep();
+                $snapshot['tick_seconds'] = $tick;
+                $snapshot['time_step'] = $tick;
+                $nearby = array();
+                foreach ($system->getObjects() as $candidate)
+                {
+                        if (!($candidate instanceof SystemObject) || $candidate === $object)
+                        {
+                                continue;
+                        }
+                        $nearby[] = array(
+                                'name' => $candidate->getName(),
+                                'category' => universe_catalog_object_category($candidate),
+                                'position' => universe_catalog_vector($candidate->getPosition()),
+                                'velocity' => universe_catalog_vector($candidate->getVelocity()),
+                                'speed' => $candidate->getSpeed(),
+                                'mass' => $candidate->getMass(),
+                                'radius' => $candidate->getRadius(),
+                                'distance' => universe_vector_distance($object->getPosition(), $candidate->getPosition()),
+                        );
+                }
+                usort($nearby, function (array $left, array $right) : int {
+                        $a = floatval($left['distance'] ?? 0.0);
+                        $b = floatval($right['distance'] ?? 0.0);
+                        return $a <=> $b;
+                });
+                if ($nearbyLimit > 0)
+                {
+                        $nearby = array_slice($nearby, 0, $nearbyLimit);
+                }
+                $snapshot['nearby'] = $nearby;
+        }
+
+        return $snapshot;
+}
+
+function universe_catalog_system_dynamics (System $system) : array
+{
+        $objects = array();
+        foreach ($system->getObjects() as $object)
+        {
+                if (!($object instanceof SystemObject)) continue;
+                $objects[] = array(
+                        'name' => $object->getName(),
+                        'category' => universe_catalog_object_category($object),
+                        'position' => universe_catalog_vector($object->getPosition()),
+                        'velocity' => universe_catalog_vector($object->getVelocity()),
+                        'speed' => $object->getSpeed(),
+                        'mass' => $object->getMass(),
+                        'radius' => $object->getRadius(),
+                );
+        }
+
+        return array(
+                'tick_seconds' => $system->getTimeStep(),
+                'objects' => $objects,
+        );
+}
+
+function universe_catalog_galaxy_dynamics (Galaxy $galaxy) : array
+{
+        $snapshot = array(
+                'position' => universe_catalog_vector($galaxy->getLocation()),
+                'velocity' => array('x' => 0.0, 'y' => 0.0, 'z' => 0.0),
+                'influence_radius' => $galaxy->getInfluenceRadius(),
+        );
+
+        return $snapshot;
+}
+
 function universe_build_catalog (Universe $universe, array $options = array()) : array
 {
         $peopleLimit = max(0, intval($options['people_limit'] ?? 50));
@@ -1250,7 +1380,10 @@ function universe_catalog_galaxy (Galaxy $galaxy, int $chronicleLimit, int $peop
                         'bounds' => $bounds
                 ),
                 'chronicle' => array_slice($chronicle, -$chronicleLimit),
-                'children' => $systems
+                'children' => $systems,
+                'metadata' => array(
+                        'dynamics' => universe_catalog_galaxy_dynamics($galaxy)
+                )
         );
 }
 
@@ -1284,7 +1417,10 @@ function universe_catalog_system (System $system, int $chronicleLimit, int $peop
                         'time_step_seconds' => $system->getTimeStep()
                 ),
                 'chronicle' => array_slice($chronicle, -$chronicleLimit),
-                'children' => $children
+                'children' => $children,
+                'metadata' => array(
+                        'dynamics' => universe_catalog_system_dynamics($system)
+                )
         );
 }
 
@@ -1310,6 +1446,9 @@ function universe_catalog_star (Star $star, int $chronicleLimit) : array
                         'luminosity' => $star->getLuminosity(),
                         'temperature' => $star->getTemperature(),
                         'stage' => $star->getStage()
+                ),
+                'metadata' => array(
+                        'dynamics' => universe_catalog_dynamics($star, 5)
                 ),
                 'chronicle' => array_slice($chronicle, -$chronicleLimit),
                 'children' => array()
@@ -1360,6 +1499,7 @@ function universe_catalog_planet (Planet $planet, int $chronicleLimit, int $peop
                 'chronicle' => array_slice($chronicle, -$chronicleLimit),
                 'children' => $countries,
                 'metadata' => array(
+                        'dynamics' => universe_catalog_dynamics($planet),
                         'weather' => array(
                                 'current' => $planet->getCurrentWeather(),
                                 'history' => array_slice($planet->getWeatherHistory($chronicleLimit), 0, $chronicleLimit)

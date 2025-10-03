@@ -13,7 +13,8 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from collections import deque
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import importlib.util
 import sys
@@ -98,9 +99,18 @@ class UniverseGUI(tk.Tk):
         self.catalog_search = tk.StringVar()
         self.console_button_text = tk.StringVar(value="Open Console")
         self.controls_button_text = tk.StringVar(value="Open Controls")
+        self.db_driver = tk.StringVar(value="sqlite")
+        self.db_host = tk.StringVar(value="localhost")
+        self.db_port = tk.StringVar(value="5432")
+        self.db_name = tk.StringVar()
+        self.db_user = tk.StringVar()
+        self.db_password = tk.StringVar()
+        self.db_path = tk.StringVar(value=str(self.project_root / "runtime" / "meta" / "metadata.sqlite"))
 
         self.catalog_data: Dict[str, Any] = {}
         self._catalog_index: Dict[str, Dict[str, Any]] = {}
+        self._path_index: Dict[str, str] = {}
+        self._selected_path: Tuple[str, ...] = tuple()
         self._catalog_refresh_job: int | None = None
         self._status_reset_job: int | None = None
 
@@ -111,6 +121,10 @@ class UniverseGUI(tk.Tk):
         self._process: subprocess.Popen[str] | None = None
         self._paused: bool = False
 
+        self._dynamics_state: Dict[str, Any] | None = None
+        self._visual_animation_job: int | None = None
+        self._current_node: Dict[str, Any] | None = None
+
         self.run_button: ttk.Button | None = None
         self.pause_button: ttk.Button | None = None
         self.stop_button: ttk.Button | None = None
@@ -120,11 +134,133 @@ class UniverseGUI(tk.Tk):
         self._visual_base_image: tk.PhotoImage | None = None
         self._visual_display_image: tk.PhotoImage | None = None
 
+        self._initialize_metadata_preferences()
         self._build_layout()
         # Ensure refresh label reflects the default DoubleVar value on startup.
         self._update_refresh_label(str(self.catalog_refresh_seconds.get()))
         self._update_status("Idle")
         self._update_console_controls()
+
+    def _initialize_metadata_preferences(self) -> None:
+        defaults = {
+            "driver": "sqlite",
+            "host": "localhost",
+            "port": "5433",
+            "database": "sgriffith",
+            "user": "sgriffith",
+            "password": "MyART1Ei5theBestest",
+            "path": str(self.project_root / "runtime" / "meta" / "metadata.sqlite"),
+        }
+        config = defaults.copy()
+        loaded = self._read_metadata_config()
+        if loaded:
+            config.update({key: value for key, value in loaded.items() if value is not None})
+
+        driver = str(config.get("driver", "sqlite")).lower()
+        if driver not in {"sqlite", "pgsql"}:
+            driver = "sqlite"
+        self.db_driver.set(driver)
+        self.db_host.set(str(config.get("host", defaults["host"])))
+        self.db_port.set(str(config.get("port", defaults["port"])))
+        self.db_name.set(str(config.get("database", defaults["database"])))
+        self.db_user.set(str(config.get("user", defaults["user"])))
+        self.db_password.set(str(config.get("password", defaults["password"])))
+        path_value = str(config.get("path", defaults["path"]))
+        if not path_value:
+            path_value = defaults["path"]
+        self.db_path.set(path_value)
+
+    def _read_metadata_config(self) -> Dict[str, Any]:
+        config_path = self.project_root / "config" / "metadata.php"
+        if not config_path.exists():
+            return {}
+        php_binary = self.php_binary.get().strip() or "php"
+        php_path = str(config_path).replace("\\", "\\\\").replace('"', '\\"')
+        script = f'echo json_encode(include "{php_path}");'
+        try:
+            result = subprocess.run(
+                [php_binary, "-r", script],
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                cwd=self.project_root,
+            )
+        except FileNotFoundError:
+            return {}
+        if result.returncode != 0 or not result.stdout:
+            return {}
+        try:
+            data = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    @staticmethod
+    def _escape_php_string(value: str) -> str:
+        return value.replace("\\", "\\\\").replace("'", "\\'")
+
+    def _apply_metadata_config(self) -> None:
+        config_path = self.project_root / "config" / "metadata.php"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        driver = self.db_driver.get().strip().lower()
+        if driver not in {"pgsql", "sqlite"}:
+            driver = "sqlite"
+
+        lines: List[str] = ["<?php declare(strict_types=1);", "", "return array("]
+        if driver == "pgsql":
+            host = self.db_host.get().strip() or "localhost"
+            try:
+                port_value = int(self.db_port.get().strip())
+            except (TypeError, ValueError):
+                port_value = 5432
+            database = self.db_name.get().strip() or self.db_user.get().strip() or "postgres"
+            user = self.db_user.get().strip()
+            password = self.db_password.get() or ""
+            lines.extend(
+                [
+                    "        'driver' => 'pgsql',",
+                    f"        'host' => '{self._escape_php_string(host)}',",
+                    f"        'port' => {port_value},",
+                    f"        'database' => '{self._escape_php_string(database)}',",
+                    f"        'user' => '{self._escape_php_string(user)}',",
+                    f"        'password' => '{self._escape_php_string(password)}',",
+                    "        'options' => array(),",
+                    "        'path' => null,",
+                ]
+            )
+        else:
+            path_value = self.db_path.get().strip()
+            if not path_value:
+                path_value = str(self.project_root / "runtime" / "meta" / "metadata.sqlite")
+            lines.extend(
+                [
+                    "        'driver' => 'sqlite',",
+                    "        'host' => 'localhost',",
+                    "        'port' => 5432,",
+                    "        'database' => null,",
+                    "        'user' => null,",
+                    "        'password' => null,",
+                    "        'options' => array(),",
+                    f"        'path' => '{self._escape_php_string(path_value)}',",
+                ]
+            )
+        lines.append(");")
+        lines.append("")
+        new_content = "\n".join(lines)
+        try:
+            if config_path.exists():
+                current = config_path.read_text(encoding="utf-8")
+                if current == new_content:
+                    return
+        except OSError:
+            pass
+        try:
+            config_path.write_text(new_content, encoding="utf-8")
+        except OSError as exc:
+            message = f"Failed to update metadata configuration: {exc}"
+            self._append_output(message + "\n")
+            messagebox.showerror("Metadata Configuration", message)
 
     def _build_layout(self) -> None:
         """Construct widgets."""
@@ -334,6 +470,7 @@ class UniverseGUI(tk.Tk):
             messagebox.showinfo("Universe Simulator", "A command is already running.")
             return
 
+        self._apply_metadata_config()
         command = self._build_command()
         if command is None:
             return
@@ -434,6 +571,7 @@ class UniverseGUI(tk.Tk):
                 view.configure(state=tk.DISABLED)
         if hasattr(self, "visual_canvas"):
             self.visual_canvas.delete("all")
+        self._stop_dynamics()
         self.clear_output()
         self._set_control_states(False)
         self._update_status("Idle")
@@ -572,6 +710,7 @@ class UniverseGUI(tk.Tk):
                     "A catalog load is already in progress.",
                 )
             return
+        self._apply_metadata_config()
         command = self._build_catalog_command()
         if command is None:
             return
@@ -625,10 +764,16 @@ class UniverseGUI(tk.Tk):
                 self._append_output("Catalog stderr:\n" + stderr + "\n")
             self._update_status("Catalog error", auto_reset=True)
             return
-        self.catalog_data = data
-        self._populate_catalog_tree(data)
-        if not silent:
-            self._append_output("Catalog loaded.\n")
+        if self.catalog_data and silent and self._selected_path:
+            self.catalog_data = data
+            self._refresh_current_node(data)
+        else:
+            self.catalog_data = data
+            self._populate_catalog_tree(data)
+            if not silent:
+                self._append_output("Catalog loaded.\n")
+        if silent and not self._selected_path:
+            self._selected_path = (self._node_token(data),)
         self._update_status("Catalog loaded", auto_reset=True)
 
     def _drain_catalog_queue(self) -> None:
@@ -896,28 +1041,394 @@ class UniverseGUI(tk.Tk):
         if self.auto_refresh.get():
             self._schedule_catalog_refresh()
 
+    def _node_token(self, node: Dict[str, Any]) -> str:
+        category = str(node.get("category", "object"))
+        name = str(node.get("name", "Unnamed"))
+        return f"{category}:{name}"
+
+    def _path_key(self, path: Sequence[str]) -> str:
+        return "|".join(path)
+
+    def _restore_selection(self, path: Sequence[str]) -> bool:
+        if not hasattr(self, "catalog_tree"):
+            return False
+        key = self._path_key(path)
+        item_id = self._path_index.get(key)
+        if not item_id:
+            return False
+        self.catalog_tree.see(item_id)
+        self.catalog_tree.selection_set(item_id)
+        self.catalog_tree.focus(item_id)
+        node = self._catalog_index.get(item_id)
+        if isinstance(node, dict):
+            self._display_catalog_details(node)
+        return True
+
     def _populate_catalog_tree(self, data: Dict[str, Any]) -> None:
         if not hasattr(self, "catalog_tree"):
             return
+        previous_path = self._selected_path
         for item in self.catalog_tree.get_children():
             self.catalog_tree.delete(item)
         self._catalog_index.clear()
-        root_id = self._insert_catalog_node("", data)
+        self._path_index.clear()
+        root_id = self._insert_catalog_node("", data, tuple())
         self.catalog_tree.item(root_id, open=True)
-        self.catalog_tree.selection_set(root_id)
-        self._display_catalog_details(data)
+        if not previous_path or not self._restore_selection(previous_path):
+            self.catalog_tree.selection_set(root_id)
+            self.catalog_tree.focus(root_id)
+            self._selected_path = (self._node_token(data),)
+            self._display_catalog_details(data)
         if self.catalog_search.get().strip():
             self._perform_catalog_search()
 
-    def _insert_catalog_node(self, parent: str, node: Dict[str, Any]) -> str:
+    def _insert_catalog_node(self, parent: str, node: Dict[str, Any], path: Tuple[str, ...]) -> str:
         name = str(node.get("name", "Unnamed"))
         summary = str(node.get("summary", ""))
         item_id = self.catalog_tree.insert(parent, tk.END, text=name, values=(summary,))
         self._catalog_index[item_id] = node
+        token = self._node_token(node)
+        node_path = path + (token,)
+        self._path_index[self._path_key(node_path)] = item_id
         for child in node.get("children", []):
             if isinstance(child, dict):
-                self._insert_catalog_node(item_id, child)
+                self._insert_catalog_node(item_id, child, node_path)
         return item_id
+
+    def _find_node_by_path(self, node: Dict[str, Any], path: Sequence[str]) -> Optional[Dict[str, Any]]:
+        if not path:
+            return node
+        token = self._node_token(node)
+        if token != path[0]:
+            return None
+        if len(path) == 1:
+            return node
+        for child in node.get("children", []):
+            if isinstance(child, dict):
+                found = self._find_node_by_path(child, path[1:])
+                if found is not None:
+                    return found
+        return None
+
+    def _refresh_current_node(self, data: Dict[str, Any]) -> None:
+        if not hasattr(self, "catalog_tree"):
+            return
+        if not self._selected_path:
+            self._populate_catalog_tree(data)
+            return
+        selection = self.catalog_tree.selection()
+        if not selection:
+            self._populate_catalog_tree(data)
+            return
+        item_id = selection[0]
+        node = self._find_node_by_path(data, self._selected_path)
+        if node is None:
+            self._populate_catalog_tree(data)
+            return
+        self._catalog_index[item_id] = node
+        self._path_index[self._path_key(self._selected_path)] = item_id
+        self.catalog_tree.item(
+            item_id,
+            text=str(node.get("name", "Unnamed")),
+            values=(str(node.get("summary", "")),),
+        )
+        self._display_catalog_details(node)
+
+    def _category_color(self, category: str) -> str:
+        palette = {
+            'universe': '#2f80ed',
+            'galaxy': '#bb86fc',
+            'system': '#03dac6',
+            'star': '#fdd663',
+            'planet': '#8ab4f8',
+            'country': '#a5d6a7',
+            'city': '#f48fb1',
+            'person': '#ffab91',
+            'materials': '#c5e1a5',
+            'element': '#81d4fa',
+            'compound': '#ffcc80',
+            'transit': '#f28cb7',
+        }
+        return palette.get(category.lower(), '#e0e0e0')
+
+    def _coerce_dynamics_body(
+        self,
+        entry: Dict[str, Any],
+        default_name: str,
+        *,
+        primary: bool = False,
+    ) -> Optional[Dict[str, Any]]:
+        if not isinstance(entry, dict):
+            return None
+        name = str(entry.get('name') or default_name or 'Unnamed')
+        category = str(entry.get('category') or entry.get('icon') or 'object').lower()
+        position = entry.get('position') if isinstance(entry.get('position'), dict) else {}
+        velocity = entry.get('velocity') if isinstance(entry.get('velocity'), dict) else {}
+        pos = [float(position.get(axis, 0.0)) for axis in ('x', 'y', 'z')]
+        vel = [float(velocity.get(axis, 0.0)) for axis in ('x', 'y', 'z')]
+        radius = float(entry.get('radius') or 0.0)
+        mass = float(entry.get('mass') or 0.0)
+        speed_value = entry.get('speed')
+        try:
+            speed = float(speed_value)
+        except (TypeError, ValueError):
+            speed = math.sqrt((vel[0] ** 2) + (vel[1] ** 2) + (vel[2] ** 2))
+        return {
+            'name': name,
+            'category': category,
+            'position': pos,
+            'velocity': vel,
+            'radius': radius,
+            'mass': mass,
+            'speed': speed,
+            'primary': primary,
+            'trail': deque(maxlen=60),
+        }
+
+    def _normalize_dynamics(self, node: Dict[str, Any], dynamics: Dict[str, Any]) -> Dict[str, Any]:
+        raw_tick = dynamics.get('tick_seconds') or dynamics.get('time_step') or dynamics.get('time_step_seconds') or 1.0
+        try:
+            tick_seconds = float(raw_tick)
+        except (TypeError, ValueError):
+            tick_seconds = 1.0
+        if tick_seconds <= 0:
+            tick_seconds = 1.0
+
+        bodies: List[Dict[str, Any]] = []
+        focus_name = str(node.get('name', ''))
+        if isinstance(dynamics.get('objects'), list):
+            for entry in dynamics['objects']:
+                body = self._coerce_dynamics_body(entry, focus_name, primary=False)
+                if body:
+                    bodies.append(body)
+            primary_assigned = False
+            for body in bodies:
+                if focus_name and body['name'] == focus_name:
+                    body['primary'] = True
+                    primary_assigned = True
+                    break
+            if not primary_assigned and bodies:
+                bodies[0]['primary'] = True
+        elif isinstance(dynamics.get('position'), dict):
+            primary_entry = {
+                'name': dynamics.get('name') or focus_name,
+                'category': dynamics.get('category') or node.get('category'),
+                'position': dynamics.get('position'),
+                'velocity': dynamics.get('velocity'),
+                'radius': dynamics.get('radius'),
+                'mass': dynamics.get('mass'),
+                'speed': dynamics.get('speed'),
+            }
+            primary_body = self._coerce_dynamics_body(primary_entry, focus_name, primary=True)
+            if primary_body:
+                bodies.append(primary_body)
+            nearby = dynamics.get('nearby')
+            if isinstance(nearby, list):
+                for entry in nearby:
+                    body = self._coerce_dynamics_body(entry, focus_name, primary=False)
+                    if body:
+                        bodies.append(body)
+
+        if not bodies:
+            return {'tick_seconds': tick_seconds, 'bodies': []}
+
+        if len(bodies) > 12:
+            bodies = bodies[:12]
+        bodies.sort(key=lambda item: (0 if item.get('primary') else 1, item.get('name', '')))
+        return {'tick_seconds': tick_seconds, 'bodies': bodies}
+
+    def _stop_dynamics(self) -> None:
+        if self._visual_animation_job is not None:
+            try:
+                self.after_cancel(self._visual_animation_job)
+            except Exception:
+                pass
+            self._visual_animation_job = None
+        self._dynamics_state = None
+
+    def _schedule_dynamics_frame(self) -> None:
+        if self._visual_animation_job is not None:
+            try:
+                self.after_cancel(self._visual_animation_job)
+            except Exception:
+                pass
+        self._visual_animation_job = self.after(600, self._advance_dynamics_frame)
+
+    def _start_dynamics(self, node: Dict[str, Any], dynamics: Dict[str, Any]) -> bool:
+        normalized = self._normalize_dynamics(node, dynamics)
+        bodies = normalized.get('bodies', [])
+        if not bodies:
+            return False
+        self._stop_dynamics()
+        self._visual_base_image = None
+        self._visual_display_image = None
+        self._dynamics_state = {
+            'tick_seconds': float(normalized.get('tick_seconds', 1.0) or 1.0),
+            'bodies': bodies,
+            'tick_count': 0,
+        }
+        self._render_dynamics_scene()
+        self._schedule_dynamics_frame()
+        return True
+
+    def _advance_dynamics_frame(self) -> None:
+        state = self._dynamics_state
+        if not state:
+            return
+        tick_seconds = float(state.get('tick_seconds', 1.0) or 1.0)
+        bodies = state.get('bodies', [])
+        for body in bodies:
+            pos = body['position']
+            vel = body['velocity']
+            trail: deque = body.setdefault('trail', deque(maxlen=60))
+            trail.append((pos[0], pos[1]))
+            pos[0] += vel[0] * tick_seconds
+            pos[1] += vel[1] * tick_seconds
+            pos[2] += vel[2] * tick_seconds
+        state['tick_count'] = int(state.get('tick_count', 0)) + 1
+        self._render_dynamics_scene()
+        self._schedule_dynamics_frame()
+
+    def _render_dynamics_scene(self) -> None:
+        state = self._dynamics_state
+        if not state or not hasattr(self, "visual_canvas"):
+            return
+        canvas = self.visual_canvas
+        canvas.delete("all")
+        width = canvas.winfo_width()
+        height = canvas.winfo_height()
+        if width <= 1 or height <= 1:
+            canvas.update_idletasks()
+            width = max(int(canvas.winfo_width()), 400)
+            height = max(int(canvas.winfo_height()), 220)
+        padding = max(min(width, height) * 0.12, 24)
+        canvas.create_rectangle(0, 0, width, height, fill="#0b0f1a", outline="")
+
+        bodies = state.get('bodies', [])
+        if not bodies:
+            return
+
+        tick_seconds = float(state.get('tick_seconds', 1.0) or 1.0)
+
+        xs = [body['position'][0] for body in bodies]
+        ys = [body['position'][1] for body in bodies]
+        min_x, max_x = min(xs), max(xs)
+        min_y, max_y = min(ys), max(ys)
+        span_x = max(max_x - min_x, 1.0)
+        span_y = max(max_y - min_y, 1.0)
+        neighbor = next((body for body in bodies if not body.get('primary')), None)
+
+        def project(x_val: float, axis_min: float, axis_span: float, length: float) -> float:
+            return padding + ((x_val - axis_min) / axis_span) * max(length - (2 * padding), 1.0)
+
+        def project_y(y_val: float) -> float:
+            return padding + ((max_y - y_val) / span_y) * max(height - (2 * padding), 1.0)
+
+        arrow_max = max(min(width, height) * 0.28, 48.0)
+        primary_arrow_floor = max(min(width, height) * 0.05, 8.0)
+
+        for body in bodies:
+            x_val, y_val = body['position'][0], body['position'][1]
+            screen_x = project(x_val, min_x, span_x, width)
+            screen_y = project_y(y_val)
+            trail_points = []
+            for tx, ty in list(body.get('trail', []))[-40:]:
+                trail_points.append(project(tx, min_x, span_x, width))
+                trail_points.append(project_y(ty))
+            if len(trail_points) >= 4:
+                canvas.create_line(trail_points, fill=self._category_color(body['category']), width=1, smooth=True)
+
+            base_size = 8.0
+            radius = max(body.get('radius', 0.0), 0.0)
+            if radius > 0:
+                base_size += min(24.0, math.log10(radius + 1.0) * 4.0)
+            if body.get('primary'):
+                base_size += 4.0
+            elif neighbor is body:
+                base_size += 2.0
+            size = max(6.0, min(base_size, min(width, height) * 0.2))
+            color = self._category_color(body['category'])
+            outline = '#f8fafc' if body.get('primary') else ('#94a3b8' if neighbor is body else '#475569')
+            canvas.create_oval(
+                screen_x - size,
+                screen_y - size,
+                screen_x + size,
+                screen_y + size,
+                fill=color,
+                outline=outline,
+                width=2 if body.get('primary') else 1,
+            )
+
+            vx, vy = body['velocity'][0], body['velocity'][1]
+            step_x = vx * tick_seconds
+            step_y = vy * tick_seconds
+            if step_x or step_y:
+                end_x = project(x_val + step_x, min_x, span_x, width)
+                end_y = project_y(y_val + step_y)
+                delta_x = end_x - screen_x
+                delta_y = end_y - screen_y
+                length = math.hypot(delta_x, delta_y)
+                if length > 1e-6:
+                    scale = 1.0
+                    if length > arrow_max:
+                        scale *= arrow_max / length
+                    if body.get('primary') and length < primary_arrow_floor:
+                        scale *= primary_arrow_floor / length
+                    elif length < 2.0:
+                        scale = 0.0
+                    if scale:
+                        delta_x *= scale
+                        delta_y *= scale
+                        canvas.create_line(
+                            screen_x,
+                            screen_y,
+                            screen_x + delta_x,
+                            screen_y + delta_y,
+                            fill='#60a5fa',
+                            arrow=tk.LAST,
+                            width=2 if body.get('primary') else 1,
+                        )
+
+            if body.get('primary') or neighbor is body:
+                label = body['name']
+                canvas.create_text(
+                    screen_x,
+                    screen_y + size + 12,
+                    text=label,
+                    fill='#f8fafc' if body.get('primary') else '#cbd5f5',
+                    font=('TkDefaultFont', 10, 'bold' if body.get('primary') else 'normal'),
+                    anchor='n',
+                )
+
+        tick_count = int(state.get('tick_count', 0))
+        canvas.create_text(
+            12,
+            12,
+            anchor='nw',
+            fill='#93c5fd',
+            text=f"Tick {tick_count}",
+            font=('TkDefaultFont', 10, 'bold'),
+        )
+        canvas.create_text(
+            12,
+            32,
+            anchor='nw',
+            fill='#9ca3af',
+            text=f"Δt {tick_seconds:.2f}s",
+            font=('TkDefaultFont', 9),
+        )
+
+        summary_lines = []
+        for body in bodies[:3]:
+            summary_lines.append(f"{body['name']}: {self._format_value(body['speed'])} m/s")
+        canvas.create_text(
+            width - 12,
+            12,
+            anchor='ne',
+            fill='#94a3b8',
+            text="\n".join(summary_lines),
+            font=('TkDefaultFont', 9),
+        )
 
     def _perform_catalog_search(self, _event: object | None = None) -> None:
         if not hasattr(self, "catalog_tree"):
@@ -981,16 +1492,38 @@ class UniverseGUI(tk.Tk):
                 pass
             self._status_reset_job = None
 
+    def _get_tree_path(self, item_id: str) -> Tuple[str, ...]:
+        if not hasattr(self, "catalog_tree"):
+            return tuple()
+        path: List[str] = []
+        current = item_id
+        while current:
+            node = self._catalog_index.get(current)
+            token = self._node_token(node) if isinstance(node, dict) else ""
+            if token:
+                path.append(token)
+            parent = self.catalog_tree.parent(current)
+            if not parent:
+                break
+            current = parent
+        return tuple(reversed(path))
+
     def _on_catalog_select(self, _: object) -> None:
         selection = self.catalog_tree.selection()
         if not selection:
             return
-        node = self._catalog_index.get(selection[0])
+        item_id = selection[0]
+        path = self._get_tree_path(item_id)
+        if path:
+            self._selected_path = path
+            self._path_index[self._path_key(path)] = item_id
+        node = self._catalog_index.get(item_id)
         if node is None:
             return
         self._display_catalog_details(node)
 
     def _display_catalog_details(self, node: Dict[str, Any]) -> None:
+        self._current_node = node
         overview_lines: List[str] = []
         category = str(node.get('category', 'object')).title()
         name = str(node.get('name', 'Unnamed'))
@@ -1189,6 +1722,10 @@ class UniverseGUI(tk.Tk):
 
         category = str(node.get('icon') or node.get('category', 'object')).lower()
         metadata = node.get('metadata') if isinstance(node.get('metadata'), dict) else {}
+        dynamics = metadata.get('dynamics') if isinstance(metadata, dict) else None
+        if isinstance(dynamics, dict) and self._start_dynamics(node, dynamics):
+            return
+        self._stop_dynamics()
 
         self._visual_base_image = None
         self._visual_display_image = None
@@ -1222,20 +1759,7 @@ class UniverseGUI(tk.Tk):
                 self._draw_planet_overlay(canvas, node, width, height)
             return
 
-        color_map = {
-            'universe': '#2f80ed',
-            'galaxy': '#bb86fc',
-            'system': '#03dac6',
-            'star': '#fdd663',
-            'planet': '#8ab4f8',
-            'country': '#a5d6a7',
-            'city': '#f48fb1',
-            'person': '#ffab91',
-            'materials': '#c5e1a5',
-            'element': '#81d4fa',
-            'compound': '#ffcc80',
-        }
-        color = color_map.get(category, '#e0e0e0')
+        color = self._category_color(category)
         cx, cy = width // 2, height // 2
         radius = min(width, height) // 3
 
@@ -1253,7 +1777,7 @@ class UniverseGUI(tk.Tk):
             for idx in range(max(planet_count, 1)):
                 orbit = (idx + 1) * radius / max(planet_count, 1)
                 canvas.create_oval(cx - orbit, cy - orbit, cx + orbit, cy + orbit, outline="#3f51b5", width=1)
-            canvas.create_oval(cx - 12, cy - 12, cx + 12, cy + 12, fill=color_map.get('star', '#fdd663'), outline="")
+            canvas.create_oval(cx - 12, cy - 12, cx + 12, cy + 12, fill=self._category_color('star'), outline="")
         elif category == 'planet':
             classification = str(node.get('statistics', {}).get('classification', '')).lower()
             if 'ice' in classification:
@@ -1600,6 +2124,45 @@ class ControlPanel(tk.Toplevel):
         ttk.Label(generation_frame, text="Workers:").grid(row=2, column=0, sticky=tk.W, padx=(8, 6), pady=4)
         ttk.Entry(generation_frame, textvariable=self.gui.workers, width=12).grid(row=2, column=1, sticky=tk.W, pady=4)
 
+        database_frame = ttk.LabelFrame(container, text="Metadata Store")
+        database_frame.pack(fill=tk.X, pady=(12, 0))
+        database_frame.columnconfigure(1, weight=1)
+        database_frame.columnconfigure(3, weight=1)
+        driver_frame = ttk.Frame(database_frame)
+        driver_frame.grid(row=0, column=0, columnspan=4, sticky=tk.W, pady=(4, 4))
+        ttk.Radiobutton(
+            driver_frame,
+            text="PostgreSQL",
+            value="pgsql",
+            variable=self.gui.db_driver,
+            command=self._update_field_states,
+        ).pack(side=tk.LEFT, padx=(0, 12))
+        ttk.Radiobutton(
+            driver_frame,
+            text="SQLite",
+            value="sqlite",
+            variable=self.gui.db_driver,
+            command=self._update_field_states,
+        ).pack(side=tk.LEFT)
+        ttk.Label(database_frame, text="Host:").grid(row=1, column=0, sticky=tk.W, padx=(8, 6), pady=4)
+        self.host_entry = ttk.Entry(database_frame, textvariable=self.gui.db_host, width=18)
+        self.host_entry.grid(row=1, column=1, sticky=tk.W, pady=4)
+        ttk.Label(database_frame, text="Port:").grid(row=1, column=2, sticky=tk.W, padx=(12, 6), pady=4)
+        self.port_entry = ttk.Entry(database_frame, textvariable=self.gui.db_port, width=8)
+        self.port_entry.grid(row=1, column=3, sticky=tk.W, pady=4)
+        ttk.Label(database_frame, text="Database:").grid(row=2, column=0, sticky=tk.W, padx=(8, 6), pady=4)
+        self.database_entry = ttk.Entry(database_frame, textvariable=self.gui.db_name, width=18)
+        self.database_entry.grid(row=2, column=1, sticky=tk.W, pady=4)
+        ttk.Label(database_frame, text="User:").grid(row=2, column=2, sticky=tk.W, padx=(12, 6), pady=4)
+        self.user_entry = ttk.Entry(database_frame, textvariable=self.gui.db_user, width=18)
+        self.user_entry.grid(row=2, column=3, sticky=tk.W, pady=4)
+        ttk.Label(database_frame, text="Password:").grid(row=3, column=0, sticky=tk.W, padx=(8, 6), pady=4)
+        self.password_entry = ttk.Entry(database_frame, textvariable=self.gui.db_password, width=18, show="•")
+        self.password_entry.grid(row=3, column=1, sticky=tk.W, pady=4)
+        ttk.Label(database_frame, text="SQLite Path:").grid(row=4, column=0, sticky=tk.W, padx=(8, 6), pady=4)
+        self.path_entry = ttk.Entry(database_frame, textvariable=self.gui.db_path, width=36)
+        self.path_entry.grid(row=4, column=1, columnspan=3, sticky=tk.EW, pady=4)
+
         button_frame = ttk.Frame(container)
         button_frame.pack(fill=tk.X, pady=(16, 0))
         self.gui.run_button = ttk.Button(button_frame, text="Run", command=self.gui.run_command)
@@ -1620,10 +2183,33 @@ class ControlPanel(tk.Toplevel):
 
         self.gui._set_control_states(self.gui._worker is not None and self.gui._worker.is_alive())
         self.gui.controls_button_text.set("Close Controls")
+        self.gui.db_driver.trace_add("write", lambda *_: self._update_field_states())
+        self._update_field_states()
 
     def _on_close(self) -> None:
         self.gui.close_control_panel(self)
         self.destroy()
+
+    def _update_field_states(self, *_args: object) -> None:
+        driver = self.gui.db_driver.get().strip().lower()
+        postgres_widgets = [
+            self.host_entry,
+            self.port_entry,
+            self.database_entry,
+            self.user_entry,
+            self.password_entry,
+        ]
+        sqlite_widgets = [self.path_entry]
+        if driver == "sqlite":
+            for widget in postgres_widgets:
+                widget.configure(state=tk.DISABLED)
+            for widget in sqlite_widgets:
+                widget.configure(state=tk.NORMAL)
+        else:
+            for widget in postgres_widgets:
+                widget.configure(state=tk.NORMAL)
+            for widget in sqlite_widgets:
+                widget.configure(state=tk.DISABLED)
 
 
 def main() -> None:
