@@ -27,3 +27,4 @@
 - [x] Track intergalactic and intersystem transit objects, including propulsion and hull metadata.
 - [x] Model stellar mass-loss events that destabilize systems and eject unbound worlds.
 - [x] Move metadata persistence to PostgreSQL with automatic SQLite fallback to eliminate lore-store contention under heavy load.
+- [x] Prune excess chronicle rows when retention limits are exceeded so catalogs stay responsive after high-volume runs.

@@ -13,5 +13,6 @@
 - [x] Promote the Universe Browser to the primary view and relocate simulation controls into a dedicated control panel window.
 - [x] Cache VisualForge portraits in the metadata store and display them alongside catalog entries.
 - [x] Split simulator output into a dedicated console window so catalog browsing remains responsive.
+- [x] Toggle console and control panel launchers to double as close buttons when their windows are visible.
 - [x] Surface portrait provenance (generator, prompt, resolution) inside the Universe Browser detail panes.
 - [x] Ship a command-line artisan that can generate or import portraits outside of VisualForge.

@@ -1103,10 +1103,38 @@ trait MetadataBackedNarrative
                         return;
                 }
                 $this->chronicleHandles[] = $entry;
+                $this->trimChronicleHandles();
+        }
+
+        protected function trimChronicleHandles() : void
+        {
                 $limit = $this->narrativeChronicleLimit();
-                if (count($this->chronicleHandles) > $limit)
+                if ($limit <= 0)
                 {
-                        $this->chronicleHandles = array_slice($this->chronicleHandles, -1 * $limit);
+                        return;
+                }
+                $count = count($this->chronicleHandles);
+                if ($count <= $limit)
+                {
+                        return;
+                }
+
+                $excess = $count - $limit;
+                $removed = array_slice($this->chronicleHandles, 0, $excess);
+                $this->chronicleHandles = array_slice($this->chronicleHandles, -1 * $limit);
+
+                $ids = array();
+                foreach ($removed as $handle)
+                {
+                        $id = (int) $handle;
+                        if ($id > 0)
+                        {
+                                $ids[] = $id;
+                        }
+                }
+                if (!empty($ids))
+                {
+                        $this->metadataStore()->deleteChronicleEntries($ids);
                 }
         }
 
@@ -1180,11 +1208,7 @@ trait MetadataBackedNarrative
                 if (!empty($handles))
                 {
                         $this->chronicleHandles = array_merge($this->chronicleHandles, $handles);
-                        $limit = $this->narrativeChronicleLimit();
-                        if (count($this->chronicleHandles) > $limit)
-                        {
-                                $this->chronicleHandles = array_slice($this->chronicleHandles, -1 * $limit);
-                        }
+                        $this->trimChronicleHandles();
                 }
         }
 }

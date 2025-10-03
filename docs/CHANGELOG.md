@@ -1,6 +1,9 @@
 # Change Log
 
 ## [Unreleased]
+- Pruned expired chronicle rows when narrative handles exceed retention limits so massive
+  run-once sessions no longer leave the metadata database bloated or stall subsequent
+  catalog loads.
 - Extended the metadata store with generator, prompt, attribute, and resolution columns so
   exported images now carry provenance and can be filtered or regenerated without manual
   bookkeeping.
@@ -56,3 +59,6 @@
 - Increased the default galaxy, system, and planet counts so each run spawns thousands of unique worlds, and left run/daemon delta values unconstrained for high-frequency experimentation.
 - Documented universal vs. planetary time units in `docs/TIMEKEEPING.md` so UI and telemetry consumers can interpret ages,
   ticks, and longevity consistently.
+- Swapped the GUI console and control panel launchers to toggles that reflect open state,
+  making it obvious when auxiliary windows are already visible and providing one-click
+  close actions.

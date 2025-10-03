@@ -96,6 +96,8 @@ class UniverseGUI(tk.Tk):
         self.pause_button_text = tk.StringVar(value="Pause")
         self.status_text = tk.StringVar(value="Idle")
         self.catalog_search = tk.StringVar()
+        self.console_button_text = tk.StringVar(value="Open Console")
+        self.controls_button_text = tk.StringVar(value="Open Controls")
 
         self.catalog_data: Dict[str, Any] = {}
         self._catalog_index: Dict[str, Dict[str, Any]] = {}
@@ -122,6 +124,7 @@ class UniverseGUI(tk.Tk):
         # Ensure refresh label reflects the default DoubleVar value on startup.
         self._update_refresh_label(str(self.catalog_refresh_seconds.get()))
         self._update_status("Idle")
+        self._update_console_controls()
 
     def _build_layout(self) -> None:
         """Construct widgets."""
@@ -233,8 +236,18 @@ class UniverseGUI(tk.Tk):
         search_entry.bind("<Return>", self._perform_catalog_search)
         ttk.Button(right_group, text="Find", command=self._perform_catalog_search, style="Toolbar.TButton").pack(side=tk.LEFT, padx=(6, 0))
         ttk.Button(right_group, text="Clear", command=self._clear_catalog_search, style="Toolbar.TButton").pack(side=tk.LEFT, padx=(6, 0))
-        ttk.Button(right_group, text="Console", command=self.show_console, style="Toolbar.TButton").pack(side=tk.LEFT, padx=(12, 0))
-        ttk.Button(right_group, text="Controls", command=self.open_control_panel, style="Toolbar.TButton").pack(side=tk.LEFT, padx=(6, 0))
+        ttk.Button(
+            right_group,
+            textvariable=self.console_button_text,
+            command=self.show_console,
+            style="Toolbar.TButton",
+        ).pack(side=tk.LEFT, padx=(12, 0))
+        ttk.Button(
+            right_group,
+            textvariable=self.controls_button_text,
+            command=self.open_control_panel,
+            style="Toolbar.TButton",
+        ).pack(side=tk.LEFT, padx=(6, 0))
 
     def _build_status_bar(self) -> None:
         status_frame = ttk.Frame(self, style="Status.TFrame")
@@ -245,7 +258,7 @@ class UniverseGUI(tk.Tk):
         ttk.Label(indicator, text="Status:", style="Highlight.TLabel").pack(side=tk.LEFT)
         self.status_label = ttk.Label(indicator, textvariable=self.status_text, style="App.TLabel")
         self.status_label.pack(side=tk.LEFT, padx=(6, 0))
-        ttk.Button(indicator, text="Open Console", command=self.show_console).pack(side=tk.RIGHT)
+        ttk.Button(indicator, textvariable=self.console_button_text, command=self.show_console).pack(side=tk.RIGHT)
 
     def _build_menu(self) -> None:
         menubar = tk.Menu(self)
@@ -287,10 +300,21 @@ class UniverseGUI(tk.Tk):
         panel = self._control_panel
         if panel is None or not panel.winfo_exists():
             self._control_panel = ControlPanel(self)
-        else:
+            self.controls_button_text.set("Close Controls")
+            return
+
+        try:
+            state = str(panel.state())
+        except tk.TclError:
+            state = "withdrawn"
+
+        if state in {"withdrawn", "iconic"}:
             panel.deiconify()
             panel.lift()
             panel.focus_force()
+            self.controls_button_text.set("Close Controls")
+        else:
+            panel._on_close()
 
     def close_control_panel(self, panel: "ControlPanel") -> None:
         if self._control_panel is panel:
@@ -298,6 +322,7 @@ class UniverseGUI(tk.Tk):
             self.run_button = None
             self.pause_button = None
             self.stop_button = None
+        self.controls_button_text.set("Open Controls")
 
     def clear_output(self) -> None:
         self._output_history.clear()
@@ -812,14 +837,26 @@ class UniverseGUI(tk.Tk):
             window = ConsoleWindow(self)
             self._console_window = window
             window.load_history(self._output_history)
-        else:
+            self._update_console_controls(True)
+            return
+
+        try:
+            state = str(window.state())
+        except tk.TclError:
+            state = "withdrawn"
+
+        if state in {"withdrawn", "iconic"}:
             window.deiconify()
             window.lift()
             window.focus_force()
+            self._update_console_controls(True)
+        else:
+            window._on_close()
 
     def _detach_console(self, console: "ConsoleWindow") -> None:
         if self._console_window is console:
             self._console_window = None
+        self._update_console_controls()
 
     def _show_help_dialog(self) -> None:
         messagebox.showinfo(
@@ -922,6 +959,19 @@ class UniverseGUI(tk.Tk):
         self._cancel_status_reset()
         if auto_reset:
             self._status_reset_job = self.after(5000, lambda: self._update_status("Idle"))
+
+    def _update_console_controls(self, state: Optional[bool] = None) -> None:
+        if state is None:
+            window = self._console_window
+            if window is None or not window.winfo_exists():
+                state = False
+            else:
+                try:
+                    state = str(window.state()) not in {"withdrawn"}
+                except tk.TclError:
+                    state = False
+        label = "Close Console" if state else "Open Console"
+        self.console_button_text.set(label)
 
     def _cancel_status_reset(self) -> None:
         if self._status_reset_job is not None:
@@ -1569,6 +1619,7 @@ class ControlPanel(tk.Toplevel):
         ttk.Button(button_frame, text="Close", command=self._on_close).pack(side=tk.RIGHT)
 
         self.gui._set_control_states(self.gui._worker is not None and self.gui._worker.is_alive())
+        self.gui.controls_button_text.set("Close Controls")
 
     def _on_close(self) -> None:
         self.gui.close_control_panel(self)
