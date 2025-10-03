@@ -31,3 +31,4 @@
 - [x] Prune excess chronicle rows when retention limits are exceeded so catalogs stay responsive after high-volume runs.
 - [x] Surface per-tick dynamics snapshots for systems, stars, and planets so interface layers can animate motion without
       invoking new simulator passes.
+- [x] Scale initial country populations to keep catalog exports responsive on multi-galaxy seeds.

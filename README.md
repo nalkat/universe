@@ -143,6 +143,16 @@ include longevity projections alongside raw population counts so operators can a
 For a deeper walkthrough—including how ticks map to universal seconds and how local
 years are resolved per planet—see [`docs/TIMEKEEPING.md`](docs/TIMEKEEPING.md).
 
+### Population scaling for responsive catalogs
+
+Earlier revisions seeded each habitable country with populations measured in the
+millions, which produced rich societies but also overwhelmed catalog exports after only
+seconds of simulated time. The generator now targets thousands of residents per
+country—still enough for vibrant chronicles and economic telemetry—so even dense
+multi-galaxy blueprints keep their population, lore, and portrait data compact. Catalogs
+complete in seconds instead of minutes, leaving the GUI free to animate orbital motion
+without saturating storage or I/O.
+
 ## Desktop control panel
 
 The `tools/universe_gui.py` script offers a lightweight Tkinter interface for running

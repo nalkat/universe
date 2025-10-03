@@ -18,6 +18,8 @@
   static for smooth browsing.
 - Calibrated the dynamics renderer to plot per-tick displacement arrows with viewport-aware
   clamping so both slow and fast bodies remain legible on the canvas.
+- Scaled habitable country seeding down to thousands of residents so lore generation and
+  catalog exports stay responsive even during multi-galaxy runs.
 - Focused the dynamics visualizer on the selected body and its closest companions while
   keeping every off-screen object advancing each simulation tick so motion never stalls.
 - Added metadata database controls to the control panel that toggle between PostgreSQL

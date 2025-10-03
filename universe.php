@@ -944,8 +944,8 @@ function universe_generate_country_profile (float $habitabilityScore, array $env
         $stability = universe_clamp($score + universe_rand_float(-0.2, 0.2) - ($climateVariance * 0.3), 0.15, 0.98);
         $adaptation = universe_clamp($score + universe_rand_float(-0.05, 0.25), 0.2, 1.0);
 
-        $populationCapacity = (int) round(universe_rand_float(0.6, 1.4) * 1000000 * max(0.3, $score));
-        $populationCapacity = max(50000, $populationCapacity);
+        $populationCapacity = (int) round(universe_rand_float(0.75, 1.35) * 5000 * max(0.25, sqrt($score)));
+        $populationCapacity = max(800, $populationCapacity);
         $developmentRate = universe_clamp(1.0 + $score * 2.5 + universe_rand_float(-0.2, 1.0), 0.5, 5.0);
 
         return array(
@@ -955,9 +955,9 @@ function universe_generate_country_profile (float $habitabilityScore, array $env
                 'stability' => $stability,
                 'population_capacity' => $populationCapacity,
                 'development_rate' => $developmentRate,
-                'starting_food' => $populationCapacity * universe_rand_float(0.4, 0.9),
-                'starting_materials' => $populationCapacity * universe_rand_float(0.2, 0.6),
-                'starting_wealth' => $populationCapacity * universe_rand_float(0.1, 0.5),
+                'starting_food' => $populationCapacity * universe_rand_float(0.6, 1.2),
+                'starting_materials' => $populationCapacity * universe_rand_float(0.3, 0.8),
+                'starting_wealth' => $populationCapacity * universe_rand_float(0.15, 0.55),
                 'adaptation' => $adaptation,
                 'immortality_chance' => universe_clamp(universe_rand_float(0.0, $score * 0.2), 0.0, 0.2)
         );
