@@ -226,34 +226,57 @@ final class MetadataStore
                         throw new \RuntimeException('Failed to prepare metadata statement.');
                 }
 
-                $typedParameters = array();
-                $simpleParameters = array();
                 foreach ($parameters as $key => $value)
                 {
+                        $paramKey = is_int($key) ? $key + 1 : $key;
+                        $paramValue = $value;
+                        $paramType = null;
+
                         if (is_array($value) && array_key_exists('value', $value))
                         {
-                                $typedParameters[$key] = $value;
-                                continue;
+                                $paramValue = $value['value'];
+                                $paramType = is_int($value['type'] ?? null) ? $value['type'] : null;
                         }
 
-                        $simpleParameters[$key] = $value;
+                        if ($paramType === null)
+                        {
+                                $paramType = $this->detectParameterType($paramValue);
+                        }
+
+                        $statement->bindValue($paramKey, $paramValue, $paramType);
                 }
 
-                foreach ($typedParameters as $key => $payload)
-                {
-                        $paramKey = is_int($key) ? $key + 1 : $key;
-                        $paramType = is_int($payload['type'] ?? null) ? $payload['type'] : \PDO::PARAM_STR;
-                        $statement->bindValue($paramKey, $payload['value'], $paramType);
-                }
-
-                return $this->withRetry(function () use ($statement, $simpleParameters) : \PDOStatement {
-                        $result = empty($simpleParameters) ? $statement->execute() : $statement->execute($simpleParameters);
+                return $this->withRetry(function () use ($statement) : \PDOStatement {
+                        $result = $statement->execute();
                         if ($result === false)
                         {
                                 throw new \RuntimeException('Failed to execute metadata statement.');
                         }
                         return $statement;
                 });
+        }
+
+        /**
+         * @param mixed $value
+         */
+        private function detectParameterType($value) : int
+        {
+                if ($value === null)
+                {
+                        return \PDO::PARAM_NULL;
+                }
+
+                if (is_bool($value))
+                {
+                        return \PDO::PARAM_BOOL;
+                }
+
+                if (is_int($value))
+                {
+                        return \PDO::PARAM_INT;
+                }
+
+                return \PDO::PARAM_STR;
         }
 
         private function query(string $sql) : \PDOStatement
