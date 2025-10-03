@@ -30,6 +30,7 @@ Timer,timer/class_timer.php
 Utility,utility/class_utility.php
 MetadataStore,utility/class_metadataStore.php
 LoreForge,utility/class_loreForge.php
+VisualForge,utility/class_visualForge.php
 Universe,class_universe.php
 UniverseDaemon,class_universeDaemon.php
 UniverseSimulator,class_universeSimulator.php

@@ -1,11 +1,22 @@
 # Change Log
 
 ## [Unreleased]
+- Extended the metadata store with generator, prompt, attribute, and resolution columns so
+  exported images now carry provenance and can be filtered or regenerated without manual
+  bookkeeping.
+- Added `tools/artisan.py`, a Python art helper that prefers diffusers pipelines when
+  available and falls back to deterministic procedural renders so portrait generation can
+  be automated even on hosts without GPU acceleration.
+- Reframed the Tkinter GUI around a toolbar-driven Universe Browser with tabbed detail
+  panes, a dedicated console window, and metadata overlays on portraits, keeping
+  exploration responsive while simulation controls live in a separate floating panel.
 - Modeled galactic tidal interactions, collision chronicles, and debris plumes while introducing `TransitObject` tracking for intergalactic wayfarers and intersystem couriers.
 - Added stellar mass-loss events that adjust planetary orbits, chronicle destabilization, and eject unbound worlds into tracked transit streams.
 - Hardened random event generation to skip rolls when no catalog objects exist and to bound affected-object sampling so catalog queries no longer crash with invalid `random_int` ranges.
 - Persisted narrative descriptions and chronicles in a repository-local SQLite metadata store so simulator objects share cached lore without inflating in-memory payloads.
 - Added busy waits and retry guards to the SQLite metadata store so concurrent catalog builds and simulations no longer emit `database is locked` warnings.
+- Stored VisualForge-generated PNG portraits for galaxies, systems, planets, settlements, residents, and material catalog entries inside the metadata database so every object now carries reusable imagery.
+- Re-centered the GUI around the Universe Browser with a menu-driven Simulation Control Panel, background catalog loading shortcuts, and automatic portrait rendering while retaining analytic maps for geographic layers.
 - Upgraded the metadata store to prefer the bundled PostgreSQL database (with automatic SQLite fallback) so lore persistence scales under heavy parallel workloads without locking contention.
 - Added entity-scoped metadata keys, description updates, and chronicle pruning so the SQLite lore store stays compact and the GUI catalog remains responsive during large runs.
 - Added configurable `--workers` support and parallel galaxy advancement to exploit multi-core CPUs when the PHP `parallel` extension is available.

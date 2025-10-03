@@ -157,21 +157,30 @@ python3 tools/universe_gui.py
 > The GUI depends on the Python `tkinter` module. Install your platform's Tk bindings
 > (for example `python3-tk` on Debian/Ubuntu) before launching the interface.
 
-Use the "Run Once" mode to execute batch simulations and review the summarized output
-in the integrated log pane, or switch to "Start Daemon" to manage a foreground daemon
-instance with custom socket and PID file paths. The GUI keeps the command history in
-view so operators can iterate quickly while we work toward a fully art-directed theme.
+The Universe Browser window now leads the experience with simulation controls available
+as a separate floating window (**Window ▸ Simulation Controls** or the toolbar button).
+The detached panel exposes PHP binary, timing, and world-generation settings without
+obscuring the catalog, while a dedicated console window handles command output so the
+main browser remains responsive.
 
 ### Exploration features
 
-- **Simulation controls** – Dedicated Pause/Resume, Stop, and Reset buttons accompany the
-  Run action so long-running or runaway simulations can be suspended, terminated, or
-  cleared without leaving the interface. A persistent status indicator shows when
-  commands are running, paused, completed, or stopping so operators always know the
-  simulator's state at a glance.
-- **Hierarchical atlas** – The Universe Browser tab renders galaxies, systems, planets,
+- **Simulation controls** – The floating control panel ships with dedicated Run,
+  Pause/Resume, Stop, and Reset actions plus quick access to catalog reloads and console
+  cleanup. A persistent status indicator in the main window reports when commands are
+  running, paused, completed, or stopping so operators always know the simulator's state
+  at a glance.
+- **Hierarchical atlas** – The browser renders galaxies, systems, planets,
   countries, cities, and citizens with chronicle excerpts, net-worth summaries, and
   planetary life breakdowns grouped by kingdom and phylum for rapid triage.
+- **Procedural portraits** – VisualForge paints PNG portraits for galaxies, systems,
+  stars, planets, countries, cities, residents, and catalogued materials. Images are
+  stored in the metadata database (PostgreSQL by default with SQLite fallback) with
+  generator prompts, resolutions, and timestamps so the browser can surface provenance
+  alongside the artwork while falling back to analytic maps for geographic layers.
+- **Dedicated console** – Command output streams into a resizable console window so
+  long-running runs no longer fight the catalog panes. The console retains recent
+  history and supports one-click clearing without resetting the browser.
 - **Map overlays** – Country selections now sketch territorial bounds and city markers
   on the canvas, city views render a local population map with individual resident dots,
   and person entries highlight their coordinates on the global projection when location
@@ -185,6 +194,20 @@ view so operators can iterate quickly while we work toward a fully art-directed 
 - **Async catalog loading** – Catalog requests now run in the background with inline
   status updates, eliminating GUI freezes when fetching massive universes or when the
   PHP CLI emits diagnostic output alongside JSON.
+
+### Portrait generation pipeline
+
+- **Metadata-backed assets** – `utility/class_metadataStore.php` now records the
+  generator responsible for each image (`VisualForge`, `tools/artisan.py`, or custom
+  pipelines), the originating prompt, output resolution, creation timestamp, and any
+  supplemental attributes. Catalog exports surface these fields alongside base64 image
+  data so UI layers can display provenance without additional lookups.
+- **`tools/artisan.py`** – A new Python helper that prefers Hugging Face diffusers
+  pipelines to synthesize entity portraits. When diffusers or GPU acceleration are
+  unavailable the tool falls back to a deterministic gradient renderer so operators can
+  still seed the metadata store with lightweight placeholders. Invoke it with
+  `python3 tools/artisan.py "luminous spiral galaxy" --format=json` to emit a
+  ready-to-ingest JSON payload or add `--output` to write PNG files directly.
 
 ## Matter and ecology scaffolding
 

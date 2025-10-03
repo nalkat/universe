@@ -106,6 +106,12 @@ class LoreForge
                         self::chronicle('formation', sprintf('%s condensed along the %s filament.', $galaxy->name, self::randomFilament())),
                         self::chronicle('observation', sprintf('Surveyors recorded %d stellar families within %.2e units.', $systemCount, $volume))
                 );
+                if (method_exists($galaxy, 'ensureVisualAsset'))
+                {
+                        $galaxy->ensureVisualAsset('primary', function () use ($galaxy, $context) : array {
+                                return VisualForge::galaxy($galaxy, $context);
+                        });
+                }
                 return array('description' => $description, 'chronicle' => $chronicle);
         }
 
@@ -125,6 +131,12 @@ class LoreForge
                         self::chronicle('formation', sprintf('%s crystallised as %d protoplanets coalesced around %s.', $system->getName(), $planetCount, $starName)),
                         self::chronicle('cadence', sprintf('Clockwork cadence revises orbital drift every %.1f seconds.', $system->getTimeStep()))
                 );
+                if (method_exists($system, 'ensureVisualAsset'))
+                {
+                        $system->ensureVisualAsset('primary', function () use ($system, $planetCount) : array {
+                                return VisualForge::system($system, array('planets' => $planetCount));
+                        });
+                }
                 return array('description' => $description, 'chronicle' => $chronicle);
         }
 
@@ -137,6 +149,12 @@ class LoreForge
                         self::chronicle('stellar_class', sprintf('%s shines as a %s star in the %s phase.', $star->getName(), $spectral, $stage)),
                         self::chronicle('fusion', sprintf('Core furnaces convert %.2f solar masses worth of fuel each cycle.', $massRatio))
                 );
+                if (method_exists($star, 'ensureVisualAsset'))
+                {
+                        $star->ensureVisualAsset('primary', function () use ($star, $context) : array {
+                                return VisualForge::star($star, $context);
+                        });
+                }
                 return array('chronicle' => $chronicle);
         }
 
@@ -164,6 +182,12 @@ class LoreForge
                 {
                         $chronicle[] = self::chronicle('weather', $line);
                 }
+                if (method_exists($planet, 'ensureVisualAsset'))
+                {
+                        $planet->ensureVisualAsset('primary', function () use ($planet, $habitability, $habitabilityClass) : array {
+                                return VisualForge::planet($planet, array('habitability' => $habitability, 'classification' => $habitabilityClass));
+                        });
+                }
                 return array('chronicle' => $chronicle);
         }
 
@@ -182,6 +206,12 @@ class LoreForge
                         self::chronicle('nucleosynthesis', sprintf('%s emerged from supernova crucibles, carrying %s.', $element->getName(), self::randomElementTrait())),
                         self::chronicle('discovery', sprintf('Catalogued for its %s reactions.', self::randomElementTrait()))
                 );
+                if (method_exists($element, 'ensureVisualAsset'))
+                {
+                        $element->ensureVisualAsset('primary', function () use ($element) : array {
+                                return VisualForge::element($element, array());
+                        });
+                }
                 return array('description' => $description, 'chronicle' => $chronicle);
         }
 
@@ -206,6 +236,12 @@ class LoreForge
                         self::chronicle('synthesis', sprintf('Molecular artisans braided %s from %s.', $compound->getName(), implode(', ', array_keys($components)))),
                         self::chronicle('applications', sprintf('Known for %s bonds and resilient lattices.', self::randomElementTrait()))
                 );
+                if (method_exists($compound, 'ensureVisualAsset'))
+                {
+                        $compound->ensureVisualAsset('primary', function () use ($compound) : array {
+                                return VisualForge::compound($compound, array());
+                        });
+                }
                 return array('description' => $description, 'chronicle' => $chronicle);
         }
 
@@ -216,6 +252,12 @@ class LoreForge
                 if ($backstory !== '')
                 {
                         array_unshift($chronicle, self::chronicle('backstory', $backstory, null, array($person->getName())));
+                }
+                if (method_exists($person, 'ensureVisualAsset'))
+                {
+                        $person->ensureVisualAsset('primary', function () use ($person) : array {
+                                return VisualForge::person($person, array());
+                        });
                 }
                 return array('chronicle' => array_slice($chronicle, -self::CHRONICLE_LIMIT));
         }

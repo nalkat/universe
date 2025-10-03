@@ -325,7 +325,7 @@ class Person extends Life
                         return;
                 }
                 $store = MetadataStore::instance();
-                $key = $this->narrativeEntityKey() . ':backstory';
+                $key = $this->narrativeKey() . ':backstory';
                 $changed = false;
                 if ($this->backstoryId !== null)
                 {

@@ -1244,6 +1244,7 @@ function universe_catalog_galaxy (Galaxy $galaxy, int $chronicleLimit, int $peop
                 'name' => $galaxy->name,
                 'summary' => sprintf('%d systems recorded.', count($systems)),
                 'description' => method_exists($galaxy, 'getDescription') ? $galaxy->getDescription() : '',
+                'image' => method_exists($galaxy, 'exportVisualAsset') ? $galaxy->exportVisualAsset() : null,
                 'statistics' => array(
                         'system_count' => count($systems),
                         'bounds' => $bounds
@@ -1276,6 +1277,7 @@ function universe_catalog_system (System $system, int $chronicleLimit, int $peop
                 'name' => $system->getName(),
                 'summary' => sprintf('%d planets orbit within the %s cadence.', count($planets), $system->getPropagationMode()),
                 'description' => method_exists($system, 'getDescription') ? $system->getDescription() : '',
+                'image' => method_exists($system, 'exportVisualAsset') ? $system->exportVisualAsset() : null,
                 'statistics' => array(
                         'age_seconds' => $system->getAge(),
                         'propagation_mode' => $system->getPropagationMode(),
@@ -1301,6 +1303,7 @@ function universe_catalog_star (Star $star, int $chronicleLimit) : array
                 'name' => $star->getName(),
                 'summary' => sprintf('%s star at %.2f solar masses.', $star->getSpectralClass(), $massRatio),
                 'description' => $star->getDescription(),
+                'image' => method_exists($star, 'exportVisualAsset') ? $star->exportVisualAsset() : null,
                 'statistics' => array(
                         'mass' => $star->getMass(),
                         'radius' => $star->getRadius(),
@@ -1343,6 +1346,7 @@ function universe_catalog_planet (Planet $planet, int $chronicleLimit, int $peop
                         intval($summary['population'] ?? 0)
                 ),
                 'description' => $planet->getDescription(),
+                'image' => method_exists($planet, 'exportVisualAsset') ? $planet->exportVisualAsset() : null,
                 'statistics' => array(
                         'habitability_score' => $summary['habitability'] ?? $planet->getHabitabilityScore(),
                         'classification' => $summary['classification'] ?? $planet->getHabitabilityClassification(),
@@ -1404,6 +1408,12 @@ function universe_catalog_country (Country $country, int $chronicleLimit, int $p
         $totals['population'] += $country->getPopulation();
         $people = $country->getPeople();
         $cities = $country->getCities();
+        if (method_exists($country, 'ensureVisualAsset'))
+        {
+                $country->ensureVisualAsset('primary', function () use ($country) : array {
+                        return VisualForge::country($country, array());
+                });
+        }
         $cityNodes = array();
         $totalResidents = count($people);
         $remaining = ($peopleLimit > 0) ? $peopleLimit : 0;
@@ -1450,6 +1460,7 @@ function universe_catalog_country (Country $country, int $chronicleLimit, int $p
                 'name' => $country->getName(),
                 'summary' => sprintf('Population %d of %d capacity.', $country->getPopulation(), $country->getPopulationCapacity()),
                 'description' => $description,
+                'image' => method_exists($country, 'exportVisualAsset') ? $country->exportVisualAsset() : null,
                 'statistics' => array(
                         'population' => $country->getPopulation(),
                         'capacity' => $country->getPopulationCapacity(),
@@ -1467,6 +1478,12 @@ function universe_catalog_city (City $city, Country $country, int $chronicleLimi
 {
         $residents = $city->getResidents();
         $selected = ($peopleLimit > 0) ? array_slice($residents, 0, $peopleLimit) : $residents;
+        if (method_exists($city, 'ensureVisualAsset'))
+        {
+                $city->ensureVisualAsset('primary', function () use ($city) : array {
+                        return VisualForge::city($city, array());
+                });
+        }
         $children = array();
         foreach ($selected as $person)
         {
@@ -1501,6 +1518,7 @@ function universe_catalog_city (City $city, Country $country, int $chronicleLimi
                 'name' => $city->getName(),
                 'summary' => sprintf('Population %d within %s.', $city->getPopulation(), $country->getName()),
                 'description' => sprintf('%s serves as a civic hub for %s.', $city->getName(), $country->getName()),
+                'image' => method_exists($city, 'exportVisualAsset') ? $city->exportVisualAsset() : null,
                 'statistics' => array(
                         'population' => $city->getPopulation(),
                         'coordinates' => $coordinates,
@@ -1536,6 +1554,7 @@ function universe_catalog_person (Person $person, int $chronicleLimit) : array
                                 ($person->getResidenceCity() instanceof City) ? ' in ' . $person->getResidenceCity()->getName() : ''
                         ),
                 'description' => $person->getBackstory(),
+                'image' => method_exists($person, 'exportVisualAsset') ? $person->exportVisualAsset() : null,
                 'statistics' => array(
                         'age_years' => round($person->getAgeInYears(), 2),
                         'life_expectancy_years' => $person->getLifeExpectancyYears(),
@@ -1558,6 +1577,8 @@ function universe_generate_material_catalog (array $options = array()) : array
         $elementCount = max(4, intval($options['element_count'] ?? 12));
         $compoundCount = max(2, intval($options['compound_count'] ?? 8));
 
+        $store = MetadataStore::instance();
+
         $elementEntries = array();
         $elements = array();
         $usedSymbols = array();
@@ -1576,12 +1597,21 @@ function universe_generate_material_catalog (array $options = array()) : array
                 $element = new Element($name, $symbol, $atomicNumber, $properties);
                 $elements[$symbol] = $element;
                 $lore = LoreForge::describeElement($element, array());
+                $imageKey = Element::class . ':catalog:' . $element->getSymbol();
+                $image = $store->exportMediaAsset(Element::class, $imageKey);
+                if ($image === null)
+                {
+                        $visual = VisualForge::element($element, array());
+                        $store->storeMediaAsset(Element::class, $imageKey, 'primary', 'image', $visual['mime_type'], $visual['content'], $visual['metadata'] ?? $visual);
+                        $image = $store->exportMediaAsset(Element::class, $imageKey);
+                }
                 $elementEntries[] = array(
                         'category' => 'element',
                         'icon' => 'element',
                         'name' => $element->getName(),
                         'summary' => sprintf('Atomic number %d, %s at STP.', $element->getAtomicNumber(), $element->getStateAtSTP()),
                         'description' => $lore['description'],
+                        'image' => $image,
                         'statistics' => array(
                                 'symbol' => $element->getSymbol(),
                                 'atomic_number' => $element->getAtomicNumber(),
@@ -1622,12 +1652,21 @@ function universe_generate_material_catalog (array $options = array()) : array
                         );
                         $compound = new Compound($name, $components, $properties);
                         $lore = LoreForge::describeCompound($compound, array());
+                        $compoundKey = Compound::class . ':catalog:' . $compound->getName();
+                        $compoundImage = $store->exportMediaAsset(Compound::class, $compoundKey);
+                        if ($compoundImage === null)
+                        {
+                                $visual = VisualForge::compound($compound, array());
+                                $store->storeMediaAsset(Compound::class, $compoundKey, 'primary', 'image', $visual['mime_type'], $visual['content'], $visual['metadata'] ?? $visual);
+                                $compoundImage = $store->exportMediaAsset(Compound::class, $compoundKey);
+                        }
                         $compoundEntries[] = array(
                                 'category' => 'compound',
                                 'icon' => 'compound',
                                 'name' => $compound->getName(),
                                 'summary' => sprintf('Components: %s.', implode(', ', array_keys($components))),
                                 'description' => $lore['description'],
+                                'image' => $compoundImage,
                                 'statistics' => array(
                                         'formula' => $compound->getFormula(),
                                         'components' => $components,

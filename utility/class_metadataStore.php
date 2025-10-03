@@ -20,6 +20,9 @@ final class MetadataStore
         /** @var array<int, array> */
         private array $chronicleCache = array();
 
+        /** @var array<int, array> */
+        private array $mediaCache = array();
+
         private function __construct()
         {
                 $config = $this->loadConfiguration();
@@ -142,7 +145,7 @@ final class MetadataStore
                 {
                         $port = 5432;
                 }
-                $dsn = sprintf('pgsql:host=%s;port=%d;dbname=%s', $host, $port, $database);
+                $dsn = sprintf('pgsql:host=%s;port=%d;dbname=%s;connect_timeout=2', $host, $port, $database);
                 $user = is_string($config['user']) ? $config['user'] : '';
                 $password = is_string($config['password']) ? $config['password'] : '';
 
@@ -274,6 +277,21 @@ final class MetadataStore
                                 timestamp DOUBLE PRECISION NOT NULL,
                                 participants TEXT NOT NULL
                         )');
+                        $this->exec('CREATE TABLE IF NOT EXISTS media_assets (
+                                id BIGSERIAL PRIMARY KEY,
+                                category TEXT NOT NULL,
+                                entity_key TEXT NOT NULL,
+                                label TEXT NOT NULL,
+                                media_type TEXT NOT NULL,
+                                mime_type TEXT NOT NULL,
+                                content BYTEA NOT NULL,
+                                created_at DOUBLE PRECISION NOT NULL,
+                                generator TEXT NOT NULL DEFAULT \'\',
+                                prompt TEXT NOT NULL DEFAULT \'\',
+                                attributes TEXT NOT NULL DEFAULT \'{}\',
+                                width INTEGER NULL,
+                                height INTEGER NULL
+                        )');
                 }
                 else
                 {
@@ -294,12 +312,31 @@ final class MetadataStore
                                 timestamp REAL NOT NULL,
                                 participants TEXT NOT NULL
                         )');
+                        $this->exec('CREATE TABLE IF NOT EXISTS media_assets (
+                                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                category TEXT NOT NULL,
+                                entity_key TEXT NOT NULL,
+                                label TEXT NOT NULL,
+                                media_type TEXT NOT NULL,
+                                mime_type TEXT NOT NULL,
+                                content BLOB NOT NULL,
+                                created_at REAL NOT NULL,
+                                generator TEXT NOT NULL DEFAULT \'\',
+                                prompt TEXT NOT NULL DEFAULT \'\',
+                                attributes TEXT NOT NULL DEFAULT \'{}\',
+                                width INTEGER NULL,
+                                height INTEGER NULL
+                        )');
                 }
 
                 $this->exec('CREATE INDEX IF NOT EXISTS idx_descriptions_category ON descriptions(category)');
                 $this->exec('CREATE INDEX IF NOT EXISTS idx_chronicles_category ON chronicles(category)');
                 $this->exec('CREATE INDEX IF NOT EXISTS idx_descriptions_entity ON descriptions(entity_key)');
                 $this->exec('CREATE INDEX IF NOT EXISTS idx_chronicles_entity ON chronicles(entity_key)');
+                $this->exec('CREATE INDEX IF NOT EXISTS idx_media_assets_entity ON media_assets(entity_key)');
+                $this->exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_media_assets_lookup ON media_assets(category, entity_key, label, media_type)');
+
+                $this->ensureMediaSchema();
 
                 if ($this->driver === self::DRIVER_SQLITE)
                 {
@@ -348,6 +385,321 @@ final class MetadataStore
                 {
                         $this->exec('VACUUM');
                 }
+        }
+
+        private function ensureMediaSchema() : void
+        {
+                $columns = array(
+                        'generator' => "TEXT NOT NULL DEFAULT ''",
+                        'prompt' => "TEXT NOT NULL DEFAULT ''",
+                        'attributes' => "TEXT NOT NULL DEFAULT '{}'",
+                        'width' => 'INTEGER NULL',
+                        'height' => 'INTEGER NULL',
+                );
+
+                foreach ($columns as $column => $definition)
+                {
+                        $this->ensureTableColumn('media_assets', $column, $definition);
+                }
+        }
+
+        private function ensureTableColumn(string $table, string $column, string $definition) : void
+        {
+                if ($this->columnExists($table, $column))
+                {
+                        return;
+                }
+
+                if ($this->driver === self::DRIVER_POSTGRES)
+                {
+                        $this->exec('ALTER TABLE ' . $table . ' ADD COLUMN ' . $column . ' ' . $definition);
+                        return;
+                }
+
+                if ($this->driver === self::DRIVER_SQLITE)
+                {
+                        $this->exec('ALTER TABLE ' . $table . ' ADD COLUMN ' . $column . ' ' . $definition);
+                }
+        }
+
+        private function columnExists(string $table, string $column) : bool
+        {
+                if ($this->driver === self::DRIVER_POSTGRES)
+                {
+                        $statement = $this->runStatement(
+                                'SELECT 1 FROM information_schema.columns WHERE table_name = :table AND column_name = :column LIMIT 1',
+                                array(
+                                        ':table' => $table,
+                                        ':column' => $column,
+                                )
+                        );
+                        $value = $statement->fetchColumn();
+                        return $value !== false;
+                }
+
+                if ($this->driver === self::DRIVER_SQLITE)
+                {
+                        $statement = $this->query('PRAGMA table_info(' . $table . ')');
+                        while ($row = $statement->fetch())
+                        {
+                                if (isset($row['name']) && strval($row['name']) === $column)
+                                {
+                                        return true;
+                                }
+                        }
+                }
+
+                return false;
+        }
+
+        /**
+         * @param array<string,mixed> $metadata
+         * @return array<string,mixed>
+         */
+        private function prepareMediaMetadata(array $metadata) : array
+        {
+                $generator = trim(strval($metadata['generator'] ?? ''));
+                if ($generator === '')
+                {
+                        $generator = 'visual_forge';
+                }
+
+                $prompt = trim(strval($metadata['prompt'] ?? ''));
+
+                $width = $metadata['width'] ?? null;
+                $height = $metadata['height'] ?? null;
+                $width = is_numeric($width) ? (int) $width : null;
+                $height = is_numeric($height) ? (int) $height : null;
+                if ($width !== null && $width <= 0)
+                {
+                        $width = null;
+                }
+                if ($height !== null && $height <= 0)
+                {
+                        $height = null;
+                }
+
+                $attributes = $this->encodeAttributes($metadata['attributes'] ?? array());
+
+                return array(
+                        ':generator' => $generator,
+                        ':prompt' => $prompt,
+                        ':attributes' => $attributes,
+                        ':width' => $width,
+                        ':height' => $height,
+                );
+        }
+
+        /**
+         * @param mixed $attributes
+         */
+        private function encodeAttributes($attributes) : string
+        {
+                if (is_array($attributes))
+                {
+                        $encoded = json_encode($attributes, JSON_UNESCAPED_SLASHES);
+                        if (is_string($encoded) && $encoded !== '')
+                        {
+                                return $encoded;
+                        }
+                }
+                elseif (is_string($attributes) && $attributes !== '')
+                {
+                        return $attributes;
+                }
+
+                return '{}';
+        }
+
+        /**
+         * @param mixed $attributes
+         * @return array<string,mixed>
+         */
+        private function decodeAttributes($attributes) : array
+        {
+                if (is_array($attributes))
+                {
+                        return $attributes;
+                }
+
+                if (!is_string($attributes) || $attributes === '')
+                {
+                        return array();
+                }
+
+                $decoded = json_decode($attributes, true);
+                if (!is_array($decoded))
+                {
+                        return array();
+                }
+
+                return $decoded;
+        }
+
+        private function findMediaHandle(string $category, string $entityKey, string $label, string $mediaType) : ?int
+        {
+                $statement = $this->runStatement(
+                        'SELECT id FROM media_assets WHERE category = :category AND entity_key = :entity_key AND label = :label AND media_type = :media_type ORDER BY id DESC LIMIT 1',
+                        array(
+                                ':category' => $category,
+                                ':entity_key' => $entityKey,
+                                ':label' => $label,
+                                ':media_type' => $mediaType,
+                        )
+                );
+                $row = $statement->fetch();
+                if ($row === false)
+                {
+                        return null;
+                }
+                return (int) ($row['id'] ?? 0);
+        }
+
+        public function storeMediaAsset(string $category, string $entityKey, string $label, string $mediaType, string $mimeType, string $content, array $metadata = array()) : int
+        {
+                $normalizedLabel = ($label === '') ? 'primary' : $label;
+                $now = microtime(true);
+                $params = array(
+                        ':category' => $category,
+                        ':entity_key' => $entityKey,
+                        ':label' => $normalizedLabel,
+                        ':media_type' => $mediaType,
+                        ':mime_type' => $mimeType,
+                        ':content' => $content,
+                        ':created_at' => $now,
+                );
+
+                $metaParams = $this->prepareMediaMetadata($metadata);
+                $params = array_merge($params, $metaParams);
+
+                $existing = $this->findMediaHandle($category, $entityKey, $normalizedLabel, $mediaType);
+                if ($existing !== null && $existing > 0)
+                {
+                        $params[':id'] = $existing;
+                        $this->runStatement(
+                                'UPDATE media_assets SET mime_type = :mime_type, content = :content, created_at = :created_at, generator = :generator, prompt = :prompt, attributes = :attributes, width = :width, height = :height WHERE id = :id',
+                                $params
+                        );
+                        unset($this->mediaCache[$existing]);
+                        return $existing;
+                }
+
+                if ($this->driver === self::DRIVER_POSTGRES)
+                {
+                        $statement = $this->runStatement(
+                                'INSERT INTO media_assets (category, entity_key, label, media_type, mime_type, content, created_at, generator, prompt, attributes, width, height) VALUES (:category, :entity_key, :label, :media_type, :mime_type, :content, :created_at, :generator, :prompt, :attributes, :width, :height) RETURNING id',
+                                $params
+                        );
+                        $id = (int) $statement->fetchColumn();
+                }
+                else
+                {
+                        $this->runStatement(
+                                'INSERT INTO media_assets (category, entity_key, label, media_type, mime_type, content, created_at, generator, prompt, attributes, width, height) VALUES (:category, :entity_key, :label, :media_type, :mime_type, :content, :created_at, :generator, :prompt, :attributes, :width, :height)',
+                                $params
+                        );
+                        $id = (int) $this->connection->lastInsertId();
+                }
+
+                if ($id > 0)
+                {
+                        $this->mediaCache[$id] = array(
+                                'id' => $id,
+                                'category' => $category,
+                                'entity_key' => $entityKey,
+                                'label' => $normalizedLabel,
+                                'media_type' => $mediaType,
+                                'mime_type' => $mimeType,
+                                'content' => $content,
+                                'created_at' => $now,
+                                'generator' => $metaParams[':generator'],
+                                'prompt' => $metaParams[':prompt'],
+                                'attributes' => $this->decodeAttributes($metaParams[':attributes']),
+                                'width' => $metaParams[':width'],
+                                'height' => $metaParams[':height'],
+                        );
+                }
+
+                return $id;
+        }
+
+        public function fetchMediaAsset(int $id) : ?array
+        {
+                if ($id <= 0)
+                {
+                        return null;
+                }
+                if (isset($this->mediaCache[$id]))
+                {
+                        return $this->mediaCache[$id];
+                }
+                $statement = $this->runStatement('SELECT id, category, entity_key, label, media_type, mime_type, content, created_at FROM media_assets WHERE id = :id LIMIT 1', array(':id' => $id));
+                $row = $statement->fetch();
+                if ($row === false)
+                {
+                        return null;
+                }
+                if (isset($row['content']) && is_resource($row['content']))
+                {
+                        $row['content'] = stream_get_contents($row['content']);
+                }
+                if (!is_string($row['content'] ?? null))
+                {
+                        $row['content'] = strval($row['content'] ?? '');
+                }
+                $row['generator'] = isset($row['generator']) ? strval($row['generator']) : 'visual_forge';
+                $row['prompt'] = isset($row['prompt']) ? strval($row['prompt']) : '';
+                $row['attributes'] = $this->decodeAttributes($row['attributes'] ?? array());
+                $row['width'] = isset($row['width']) ? (($row['width'] === null) ? null : (int) $row['width']) : null;
+                $row['height'] = isset($row['height']) ? (($row['height'] === null) ? null : (int) $row['height']) : null;
+                $row['created_at'] = isset($row['created_at']) ? (float) $row['created_at'] : microtime(true);
+                $row['id'] = (int) $row['id'];
+                $this->mediaCache[$row['id']] = $row;
+                return $row;
+        }
+
+        public function findMediaAsset(string $category, string $entityKey, string $label, string $mediaType) : ?array
+        {
+                $handle = $this->findMediaHandle($category, $entityKey, $label, $mediaType);
+                if ($handle === null)
+                {
+                        return null;
+                }
+                return $this->fetchMediaAsset($handle);
+        }
+
+        public function findMediaAssetHandle(string $category, string $entityKey, string $label, string $mediaType) : ?int
+        {
+                return $this->findMediaHandle($category, $entityKey, $label, $mediaType);
+        }
+
+        public function exportMediaAsset(string $category, string $entityKey, string $label = 'primary', string $mediaType = 'image') : ?array
+        {
+                $asset = $this->findMediaAsset($category, $entityKey, $label, $mediaType);
+                if ($asset === null)
+                {
+                        return null;
+                }
+                $content = strval($asset['content'] ?? '');
+                if ($content === '')
+                {
+                        return null;
+                }
+                return array(
+                        'id' => (int) $asset['id'],
+                        'label' => $label,
+                        'media_type' => $mediaType,
+                        'mime_type' => strval($asset['mime_type'] ?? 'image/png'),
+                        'data' => base64_encode($content),
+                        'metadata' => array(
+                                'generator' => strval($asset['generator'] ?? 'visual_forge'),
+                                'prompt' => strval($asset['prompt'] ?? ''),
+                                'width' => isset($asset['width']) ? (($asset['width'] === null) ? null : (int) $asset['width']) : null,
+                                'height' => isset($asset['height']) ? (($asset['height'] === null) ? null : (int) $asset['height']) : null,
+                                'created_at' => isset($asset['created_at']) ? (float) $asset['created_at'] : null,
+                                'attributes' => $this->decodeAttributes($asset['attributes'] ?? array()),
+                        ),
+                );
         }
 
         public function storeDescription(string $content, string $category, string $entityKey) : int
@@ -567,6 +919,9 @@ trait MetadataBackedNarrative
         /** @var array<int> */
         protected array $chronicleHandles = array();
 
+        /** @var array<string, int> */
+        protected array $mediaHandles = array();
+
         protected function metadataStore() : MetadataStore
         {
                 return MetadataStore::instance();
@@ -657,6 +1012,86 @@ trait MetadataBackedNarrative
                         return array();
                 }
                 return $this->metadataStore()->fetchChronicleEntries($handles);
+        }
+
+        protected function narrativeMediaHandle(string $label) : ?int
+        {
+                $normalized = ($label === '') ? 'primary' : $label;
+                if (isset($this->mediaHandles[$normalized]))
+                {
+                        return (int) $this->mediaHandles[$normalized];
+                }
+                $store = $this->metadataStore();
+                $handle = $store->findMediaAssetHandle($this->narrativeCategory(), $this->narrativeKey(), $normalized, 'image');
+                if ($handle !== null)
+                {
+                        $this->mediaHandles[$normalized] = $handle;
+                }
+                return $handle;
+        }
+
+        public function ensureVisualAsset(string $label, callable $generator) : void
+        {
+                $normalized = ($label === '') ? 'primary' : $label;
+                if ($this->narrativeMediaHandle($normalized) !== null)
+                {
+                        return;
+                }
+                $candidate = $generator();
+                if (!is_array($candidate))
+                {
+                        return;
+                }
+                $mimeType = strval($candidate['mime_type'] ?? 'image/png');
+                $content = $candidate['content'] ?? null;
+                if (!is_string($content) || $content === '')
+                {
+                        return;
+                }
+                $metadata = array();
+                if (isset($candidate['metadata']) && is_array($candidate['metadata']))
+                {
+                        $metadata = $candidate['metadata'];
+                }
+                foreach (array('generator', 'prompt', 'width', 'height', 'attributes') as $field)
+                {
+                        if (array_key_exists($field, $candidate) && !array_key_exists($field, $metadata))
+                        {
+                                $metadata[$field] = $candidate[$field];
+                        }
+                }
+                $store = $this->metadataStore();
+                $handle = $store->storeMediaAsset($this->narrativeCategory(), $this->narrativeKey(), $normalized, 'image', $mimeType, $content, $metadata);
+                if ($handle > 0)
+                {
+                        $this->mediaHandles[$normalized] = $handle;
+                }
+        }
+
+        public function setVisualAsset(string $label, string $mimeType, string $content, array $metadata = array()) : void
+        {
+                $normalized = ($label === '') ? 'primary' : $label;
+                $store = $this->metadataStore();
+                $handle = $store->storeMediaAsset($this->narrativeCategory(), $this->narrativeKey(), $normalized, 'image', $mimeType, $content, $metadata);
+                if ($handle > 0)
+                {
+                        $this->mediaHandles[$normalized] = $handle;
+                }
+        }
+
+        public function getVisualAsset(string $label = 'primary') : ?array
+        {
+                $handle = $this->narrativeMediaHandle($label);
+                if ($handle === null)
+                {
+                        return null;
+                }
+                return $this->metadataStore()->fetchMediaAsset($handle);
+        }
+
+        public function exportVisualAsset(string $label = 'primary') : ?array
+        {
+                return $this->metadataStore()->exportMediaAsset($this->narrativeCategory(), $this->narrativeKey(), ($label === '') ? 'primary' : $label, 'image');
         }
 
         protected function addNarrativeChronicle(string $type, string $text, float $timestamp, array $participants) : void
