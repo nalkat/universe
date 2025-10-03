@@ -1182,6 +1182,8 @@ class UniverseGUI(tk.Tk):
             'mass': mass,
             'speed': speed,
             'primary': primary,
+            'distance': float(entry.get('distance') or 0.0),
+            'visible': True,
             'trail': deque(maxlen=60),
         }
 
@@ -1196,6 +1198,7 @@ class UniverseGUI(tk.Tk):
 
         bodies: List[Dict[str, Any]] = []
         focus_name = str(node.get('name', ''))
+        focus_category = str(node.get('category', '')).lower()
         if isinstance(dynamics.get('objects'), list):
             for entry in dynamics['objects']:
                 body = self._coerce_dynamics_body(entry, focus_name, primary=False)
@@ -1232,9 +1235,46 @@ class UniverseGUI(tk.Tk):
         if not bodies:
             return {'tick_seconds': tick_seconds, 'bodies': []}
 
-        if len(bodies) > 12:
-            bodies = bodies[:12]
-        bodies.sort(key=lambda item: (0 if item.get('primary') else 1, item.get('name', '')))
+        for body in bodies:
+            body['visible'] = False
+
+        primary_body = next((body for body in bodies if body.get('primary')), None)
+        if primary_body is None and bodies:
+            if focus_category == 'system':
+                primary_body = next(
+                    (body for body in bodies if body['category'] in {'star', 'primary-star', 'sun'}),
+                    None,
+                )
+            if primary_body is None:
+                primary_body = max(bodies, key=lambda item: item.get('mass', 0.0))
+            primary_body['primary'] = True
+
+        if primary_body:
+            px, py, pz = primary_body['position']
+            for body in bodies:
+                dx = body['position'][0] - px
+                dy = body['position'][1] - py
+                dz = body['position'][2] - pz
+                body['distance'] = math.sqrt((dx ** 2) + (dy ** 2) + (dz ** 2))
+
+            if focus_category == 'system':
+                max_visible = min(len(bodies), 9)
+            elif focus_category in {'planet', 'moon', 'asteroid', 'comet', 'star'}:
+                max_visible = min(len(bodies), 6)
+            else:
+                max_visible = min(len(bodies), 5)
+
+            primary_body['visible'] = True
+            others = [body for body in bodies if body is not primary_body]
+            others.sort(key=lambda item: item.get('distance', float('inf')))
+            for body in others[: max(0, max_visible - 1)]:
+                body['visible'] = True
+        else:
+            for index, body in enumerate(bodies):
+                body['primary'] = (index == 0)
+                body['visible'] = index < min(len(bodies), 5)
+
+        bodies.sort(key=lambda item: (0 if item.get('primary') else 1, item.get('distance', float('inf')), item.get('name', '')))
         return {'tick_seconds': tick_seconds, 'bodies': bodies}
 
     def _stop_dynamics(self) -> None:
@@ -1308,15 +1348,21 @@ class UniverseGUI(tk.Tk):
         if not bodies:
             return
 
+        visible_bodies = [body for body in bodies if body.get('visible')]
+        if not visible_bodies:
+            visible_bodies = bodies
+        if not visible_bodies:
+            return
+
         tick_seconds = float(state.get('tick_seconds', 1.0) or 1.0)
 
-        xs = [body['position'][0] for body in bodies]
-        ys = [body['position'][1] for body in bodies]
+        xs = [body['position'][0] for body in visible_bodies]
+        ys = [body['position'][1] for body in visible_bodies]
         min_x, max_x = min(xs), max(xs)
         min_y, max_y = min(ys), max(ys)
         span_x = max(max_x - min_x, 1.0)
         span_y = max(max_y - min_y, 1.0)
-        neighbor = next((body for body in bodies if not body.get('primary')), None)
+        neighbor = next((body for body in visible_bodies if not body.get('primary')), None)
 
         def project(x_val: float, axis_min: float, axis_span: float, length: float) -> float:
             return padding + ((x_val - axis_min) / axis_span) * max(length - (2 * padding), 1.0)
@@ -1327,7 +1373,7 @@ class UniverseGUI(tk.Tk):
         arrow_max = max(min(width, height) * 0.28, 48.0)
         primary_arrow_floor = max(min(width, height) * 0.05, 8.0)
 
-        for body in bodies:
+        for body in visible_bodies:
             x_val, y_val = body['position'][0], body['position'][1]
             screen_x = project(x_val, min_x, span_x, width)
             screen_y = project_y(y_val)
@@ -1419,7 +1465,7 @@ class UniverseGUI(tk.Tk):
         )
 
         summary_lines = []
-        for body in bodies[:3]:
+        for body in visible_bodies[:3]:
             summary_lines.append(f"{body['name']}: {self._format_value(body['speed'])} m/s")
         canvas.create_text(
             width - 12,

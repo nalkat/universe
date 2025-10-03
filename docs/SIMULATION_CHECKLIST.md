@@ -4,6 +4,7 @@
 - [x] Define requirements for people viability gating.
 - [ ] Implement dynamic event pipeline for civilizations.
 - [x] Improve the universe simulator executable to orchestrate subobject ticks.
+- [x] Guarantee universal tick cascades advance every galaxy, system, and object regardless of UI focus.
 - [x] Document readiness criteria for population spawning.
 - [x] Introduce a blueprint-driven bootstrapper that wires galaxies, systems, planets, and countries together.
 - [x] Procedurally generate galaxies, stellar systems, and planets with configurable seeds and object-count targets.

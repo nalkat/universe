@@ -651,9 +651,10 @@ class Universe
 
         public function advance (float $deltaTime = 1.0) : void
         {
+                $step = max(0.0, $deltaTime);
                 $this->tick();
-                $this->simulateMacroDynamics($deltaTime);
-                if ($this->attemptParallelAdvance($deltaTime))
+                $this->simulateMacroDynamics($step);
+                if ($this->attemptParallelAdvance($step))
                 {
                         return;
                 }
@@ -661,7 +662,7 @@ class Universe
                 {
                         if ($galaxy instanceof Galaxy)
                         {
-                                $galaxy->tick($deltaTime);
+                                $galaxy->tick($step);
                         }
                 }
         }

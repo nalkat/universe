@@ -17,4 +17,5 @@
 - [x] Surface portrait provenance (generator, prompt, resolution) inside the Universe Browser detail panes.
 - [x] Ship a command-line artisan that can generate or import portraits outside of VisualForge.
 - [x] Animate the visual canvas with per-tick dynamics for the selected catalog object and its nearby bodies.
+- [x] Focus the dynamics visualizer on the selected object and its closest neighbours while keeping off-screen bodies advancing.
 - [x] Expose PostgreSQL/SQLite selection in the control panel and update the metadata configuration automatically.
