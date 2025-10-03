@@ -1,10 +1,12 @@
 <?php declare(strict_types=1);
 
 return array(
-        'driver' => 'pgsql',
+        'driver' => 'memory',
         'host' => 'localhost',
-        'port' => 5433,
-        'database' => 'sgriffith',
-        'user' => 'sgriffith',
-        'password' => 'MyART1Ei5theBestest',
+        'port' => 5432,
+        'database' => null,
+        'user' => null,
+        'password' => null,
+        'options' => array(),
+        'path' => null,
 );

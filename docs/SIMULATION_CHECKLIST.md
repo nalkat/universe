@@ -27,7 +27,7 @@
 - [x] Simulate galactic collisions and tidal interactions with recorded chronicles.
 - [x] Track intergalactic and intersystem transit objects, including propulsion and hull metadata.
 - [x] Model stellar mass-loss events that destabilize systems and eject unbound worlds.
-- [x] Move metadata persistence to PostgreSQL with automatic SQLite fallback to eliminate lore-store contention under heavy load.
+- [x] Move metadata persistence to PostgreSQL with automatic SQLite fallback and ship a zero-I/O in-memory mode to eliminate lore-store contention under heavy load.
 - [x] Prune excess chronicle rows when retention limits are exceeded so catalogs stay responsive after high-volume runs.
 - [x] Surface per-tick dynamics snapshots for systems, stars, and planets so interface layers can animate motion without
       invoking new simulator passes.

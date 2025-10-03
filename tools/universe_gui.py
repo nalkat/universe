@@ -99,7 +99,7 @@ class UniverseGUI(tk.Tk):
         self.catalog_search = tk.StringVar()
         self.console_button_text = tk.StringVar(value="Open Console")
         self.controls_button_text = tk.StringVar(value="Open Controls")
-        self.db_driver = tk.StringVar(value="sqlite")
+        self.db_driver = tk.StringVar(value="memory")
         self.db_host = tk.StringVar(value="localhost")
         self.db_port = tk.StringVar(value="5432")
         self.db_name = tk.StringVar()
@@ -118,6 +118,8 @@ class UniverseGUI(tk.Tk):
         self._catalog_queue: queue.Queue[Any] = queue.Queue()
         self._worker: threading.Thread | None = None
         self._catalog_worker: threading.Thread | None = None
+        self._catalog_process: subprocess.Popen[str] | None = None
+        self._catalog_cancel = threading.Event()
         self._process: subprocess.Popen[str] | None = None
         self._paused: bool = False
 
@@ -143,7 +145,7 @@ class UniverseGUI(tk.Tk):
 
     def _initialize_metadata_preferences(self) -> None:
         defaults = {
-            "driver": "sqlite",
+            "driver": "memory",
             "host": "localhost",
             "port": "5433",
             "database": "sgriffith",
@@ -157,8 +159,8 @@ class UniverseGUI(tk.Tk):
             config.update({key: value for key, value in loaded.items() if value is not None})
 
         driver = str(config.get("driver", "sqlite")).lower()
-        if driver not in {"sqlite", "pgsql"}:
-            driver = "sqlite"
+        if driver not in {"sqlite", "pgsql", "memory"}:
+            driver = "memory"
         self.db_driver.set(driver)
         self.db_host.set(str(config.get("host", defaults["host"])))
         self.db_port.set(str(config.get("port", defaults["port"])))
@@ -204,8 +206,8 @@ class UniverseGUI(tk.Tk):
         config_path = self.project_root / "config" / "metadata.php"
         config_path.parent.mkdir(parents=True, exist_ok=True)
         driver = self.db_driver.get().strip().lower()
-        if driver not in {"pgsql", "sqlite"}:
-            driver = "sqlite"
+        if driver not in {"pgsql", "sqlite", "memory"}:
+            driver = "memory"
 
         lines: List[str] = ["<?php declare(strict_types=1);", "", "return array("]
         if driver == "pgsql":
@@ -229,7 +231,7 @@ class UniverseGUI(tk.Tk):
                     "        'path' => null,",
                 ]
             )
-        else:
+        elif driver == "sqlite":
             path_value = self.db_path.get().strip()
             if not path_value:
                 path_value = str(self.project_root / "runtime" / "meta" / "metadata.sqlite")
@@ -243,6 +245,19 @@ class UniverseGUI(tk.Tk):
                     "        'password' => null,",
                     "        'options' => array(),",
                     f"        'path' => '{self._escape_php_string(path_value)}',",
+                ]
+            )
+        else:
+            lines.extend(
+                [
+                    "        'driver' => 'memory',",
+                    "        'host' => 'localhost',",
+                    "        'port' => 5432,",
+                    "        'database' => null,",
+                    "        'user' => null,",
+                    "        'password' => null,",
+                    "        'options' => array(),",
+                    "        'path' => null,",
                 ]
             )
         lines.append(");")
@@ -509,6 +524,7 @@ class UniverseGUI(tk.Tk):
             messagebox.showerror("Universe Simulator", f"Unable to toggle pause: {exc}")
 
     def stop_command(self) -> None:
+        self._cancel_catalog_load()
         process = self._process
         if process is None:
             self._update_status("Idle")
@@ -536,6 +552,7 @@ class UniverseGUI(tk.Tk):
             self.after(50, self.reset_interface)
             return
 
+        self._cancel_catalog_load()
         self.mode.set("run_once")
         self.steps.set("1")
         self.delta.set("60")
@@ -552,10 +569,15 @@ class UniverseGUI(tk.Tk):
         self.pid_file_path.set(str(self.project_root / "runtime" / "universe.pid"))
         self.foreground.set(True)
         self.catalog_refresh_seconds.set(10.0)
+        try:
+            refresh_value = float(self.catalog_refresh_seconds.get())
+        except (tk.TclError, TypeError, ValueError):
+            refresh_value = 10.0
+            self.catalog_refresh_seconds.set(refresh_value)
         if hasattr(self, "refresh_spin"):
             self.refresh_spin.delete(0, tk.END)
-            self.refresh_spin.insert(0, f"{self.catalog_refresh_seconds.get():.0f}")
-        self._update_refresh_label(str(self.catalog_refresh_seconds.get()))
+            self.refresh_spin.insert(0, f"{refresh_value:.0f}")
+        self._update_refresh_label(str(refresh_value))
         self.auto_refresh.set(False)
         self._cancel_catalog_refresh()
         self.catalog_data = {}
@@ -710,6 +732,7 @@ class UniverseGUI(tk.Tk):
                     "A catalog load is already in progress.",
                 )
             return
+        self._catalog_cancel.clear()
         self._apply_metadata_config()
         command = self._build_catalog_command()
         if command is None:
@@ -723,24 +746,41 @@ class UniverseGUI(tk.Tk):
         self.after(100, self._drain_catalog_queue)
         self._update_status("Loading catalog...")
 
+    def _cancel_catalog_load(self) -> None:
+        self._catalog_cancel.set()
+        process = self._catalog_process
+        if process is not None and process.poll() is None:
+            try:
+                process.terminate()
+                process.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                process.kill()
+            except OSError:
+                pass
+        self._catalog_process = None
+
     def _run_catalog_command(self, command: List[str], silent: bool) -> None:
         try:
-            result = subprocess.run(
+            process = subprocess.Popen(
                 command,
-                check=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
                 cwd=self.project_root,
             )
-            stdout = result.stdout or ""
-            stderr = result.stderr or ""
-            self._catalog_queue.put(("success", stdout, stderr, silent))
-        except subprocess.CalledProcessError as exc:
-            message = (exc.stderr or "").strip() or str(exc)
-            stdout = exc.stdout or ""
-            stderr = exc.stderr or ""
-            self._catalog_queue.put(("error", message, stdout, stderr, silent))
+            self._catalog_process = process
+            stdout, stderr = process.communicate()
+            self._catalog_process = None
+            if self._catalog_cancel.is_set():
+                self._catalog_queue.put(("cancelled", stdout or "", stderr or "", silent))
+                return
+            if process.returncode == 0:
+                self._catalog_queue.put(("success", stdout or "", stderr or "", silent))
+            else:
+                message = (stderr or "").strip() or f"Catalog exited with {process.returncode}"
+                self._catalog_queue.put(("error", message, stdout or "", stderr or "", silent))
+        except FileNotFoundError as exc:
+            self._catalog_queue.put(("exception", str(exc), silent))
         except Exception as exc:
             self._catalog_queue.put(("exception", str(exc), silent))
 
@@ -805,6 +845,13 @@ class UniverseGUI(tk.Tk):
                 else:
                     messagebox.showerror("Universe Simulator", f"Catalog command failed: {message}")
                 self._update_status("Catalog error", auto_reset=True)
+            elif tag == "cancelled":
+                _, stdout, stderr, silent = item
+                if stdout and not silent:
+                    self._append_output(stdout)
+                if stderr and not silent:
+                    self._append_output(stderr)
+                self._update_status("Catalog cancelled", auto_reset=True)
         worker = self._catalog_worker
         if worker is not None and worker.is_alive():
             self.after(100, self._drain_catalog_queue)
@@ -2189,6 +2236,13 @@ class ControlPanel(tk.Toplevel):
             value="sqlite",
             variable=self.gui.db_driver,
             command=self._update_field_states,
+        ).pack(side=tk.LEFT, padx=(0, 12))
+        ttk.Radiobutton(
+            driver_frame,
+            text="In-Memory",
+            value="memory",
+            variable=self.gui.db_driver,
+            command=self._update_field_states,
         ).pack(side=tk.LEFT)
         ttk.Label(database_frame, text="Host:").grid(row=1, column=0, sticky=tk.W, padx=(8, 6), pady=4)
         self.host_entry = ttk.Entry(database_frame, textvariable=self.gui.db_host, width=18)
@@ -2251,10 +2305,13 @@ class ControlPanel(tk.Toplevel):
                 widget.configure(state=tk.DISABLED)
             for widget in sqlite_widgets:
                 widget.configure(state=tk.NORMAL)
-        else:
+        elif driver == "pgsql":
             for widget in postgres_widgets:
                 widget.configure(state=tk.NORMAL)
             for widget in sqlite_widgets:
+                widget.configure(state=tk.DISABLED)
+        else:
+            for widget in postgres_widgets + sqlite_widgets:
                 widget.configure(state=tk.DISABLED)
 
 

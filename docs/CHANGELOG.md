@@ -1,6 +1,15 @@
 # Change Log
 
 ## [Unreleased]
+- Added an in-memory metadata backend that becomes the default store, eliminating
+  disk writes during exploratory runs while keeping the SQLite and PostgreSQL
+  integrations available for long-lived simulations.
+- Taught the control panel to cancel in-flight catalog exports when operators
+  stop or reset the simulator, preventing background PHP processes from running
+  indefinitely and surfacing a clear "Catalog cancelled" status.
+- Hardened the refresh reset workflow by guarding the catalog delay spinner
+  against empty Tk values so resetting the interface no longer raises Tkinter
+  exceptions on hosts with aggressive focus policies.
 - Exported dynamics snapshots (position, velocity, nearby bodies, and tick cadence) for
   stars, planets, and systems so catalog consumers can visualize orbital motion without
   querying the simulation directly.

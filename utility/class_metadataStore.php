@@ -8,10 +8,11 @@ final class MetadataStore
 
         private const DRIVER_SQLITE = 'sqlite';
         private const DRIVER_POSTGRES = 'pgsql';
+        private const DRIVER_MEMORY = 'memory';
 
         private static ?MetadataStore $instance = null;
 
-        private \PDO $connection;
+        private ?\PDO $connection = null;
         private string $driver;
 
         /** @var array<int, string> */
@@ -23,10 +24,36 @@ final class MetadataStore
         /** @var array<int, array> */
         private array $mediaCache = array();
 
+        /** @var array<string, int> */
+        private array $memoryDescriptionKeys = array();
+
+        /** @var array<int, array{category:string,entity_key:string,content:string,created_at:float}> */
+        private array $memoryDescriptions = array();
+
+        /** @var array<int, array{type:string,text:string,timestamp:float,participants:array<int,string>,category:string,entity_key:string}> */
+        private array $memoryChronicles = array();
+
+        /** @var array<string, array<int>> */
+        private array $memoryChronicleKeys = array();
+
+        /** @var array<int, array{category:string,entity_key:string,label:string,media_type:string,mime_type:string,content:string,created_at:float,generator:string,prompt:string,attributes:array<string,mixed>,width: ?int,height:?int}> */
+        private array $memoryMedia = array();
+
+        /** @var array<string, array<string, int>> */
+        private array $memoryMediaKeys = array();
+
+        private int $memoryAutoIncrement = 1;
+
         private function __construct()
         {
                 $config = $this->loadConfiguration();
                 $this->driver = $config['driver'];
+
+                if ($this->driver === self::DRIVER_MEMORY)
+                {
+                        $this->connection = null;
+                        return;
+                }
 
                 if ($this->driver === self::DRIVER_POSTGRES)
                 {
@@ -49,10 +76,20 @@ final class MetadataStore
                 $this->initializeSchema();
         }
 
+        private function nextMemoryId() : int
+        {
+                return $this->memoryAutoIncrement++;
+        }
+
+        private function memoryKey(string $category, string $entityKey) : string
+        {
+                return $category . '::' . $entityKey;
+        }
+
         private function loadConfiguration() : array
         {
                 $defaults = array(
-                        'driver' => self::DRIVER_SQLITE,
+                        'driver' => self::DRIVER_MEMORY,
                         'host' => 'localhost',
                         'port' => 5432,
                         'database' => null,
@@ -76,7 +113,7 @@ final class MetadataStore
 
                 $merged = array_merge($defaults, $config);
                 $driver = strtolower(strval($merged['driver']));
-                if ($driver !== self::DRIVER_POSTGRES)
+                if ($driver !== self::DRIVER_POSTGRES && $driver !== self::DRIVER_MEMORY)
                 {
                         $driver = self::DRIVER_SQLITE;
                 }
@@ -159,6 +196,10 @@ final class MetadataStore
          */
         private function withRetry(callable $operation)
         {
+                if ($this->driver === self::DRIVER_MEMORY)
+                {
+                        return $operation();
+                }
                 $attempts = 0;
                 $delay = 50000;
                 while (true)
@@ -302,6 +343,10 @@ final class MetadataStore
 
         private function initializeSchema() : void
         {
+                if ($this->driver === self::DRIVER_MEMORY)
+                {
+                        return;
+                }
                 if ($this->driver === self::DRIVER_POSTGRES)
                 {
                         $this->exec('CREATE TABLE IF NOT EXISTS metadata_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
@@ -582,6 +627,17 @@ final class MetadataStore
 
         private function findMediaHandle(string $category, string $entityKey, string $label, string $mediaType) : ?int
         {
+                if ($this->driver === self::DRIVER_MEMORY)
+                {
+                        $normalized = ($label === '') ? 'primary' : $label;
+                        $key = $this->memoryKey($category, $entityKey);
+                        $compound = $normalized . '|' . $mediaType;
+                        if (isset($this->memoryMediaKeys[$key][$compound]))
+                        {
+                                return (int) $this->memoryMediaKeys[$key][$compound];
+                        }
+                        return null;
+                }
                 $statement = $this->runStatement(
                         'SELECT id FROM media_assets WHERE category = :category AND entity_key = :entity_key AND label = :label AND media_type = :media_type ORDER BY id DESC LIMIT 1',
                         array(
@@ -603,6 +659,46 @@ final class MetadataStore
         {
                 $normalizedLabel = ($label === '') ? 'primary' : $label;
                 $now = microtime(true);
+
+                if ($this->driver === self::DRIVER_MEMORY)
+                {
+                        $metaParams = $this->prepareMediaMetadata($metadata);
+                        $record = array(
+                                'category' => $category,
+                                'entity_key' => $entityKey,
+                                'label' => $normalizedLabel,
+                                'media_type' => $mediaType,
+                                'mime_type' => $mimeType,
+                                'content' => $content,
+                                'created_at' => $now,
+                                'generator' => $metaParams[':generator'],
+                                'prompt' => $metaParams[':prompt'],
+                                'attributes' => $this->decodeAttributes($metaParams[':attributes']),
+                                'width' => ($metaParams[':width'] === null) ? null : (int) $metaParams[':width'],
+                                'height' => ($metaParams[':height'] === null) ? null : (int) $metaParams[':height'],
+                        );
+                        $key = $this->memoryKey($category, $entityKey);
+                        $compound = $normalizedLabel . '|' . $mediaType;
+                        if (isset($this->memoryMediaKeys[$key][$compound]))
+                        {
+                                $id = (int) $this->memoryMediaKeys[$key][$compound];
+                                $record['id'] = $id;
+                                $this->memoryMedia[$id] = $record;
+                                $this->mediaCache[$id] = $record;
+                                return $id;
+                        }
+                        $id = $this->nextMemoryId();
+                        $record['id'] = $id;
+                        if (!isset($this->memoryMediaKeys[$key]))
+                        {
+                                $this->memoryMediaKeys[$key] = array();
+                        }
+                        $this->memoryMediaKeys[$key][$compound] = $id;
+                        $this->memoryMedia[$id] = $record;
+                        $this->mediaCache[$id] = $record;
+                        return $id;
+                }
+
                 $params = array(
                         ':category' => $category,
                         ':entity_key' => $entityKey,
@@ -641,7 +737,7 @@ final class MetadataStore
                 else
                 {
                         $this->runStatement(
-                                'INSERT INTO media_assets (category, entity_key, label, media_type, mime_type, content, created_at, generator, prompt, attributes, width, height) VALUES (:category, :entity_key, :label, :media_type, :mime_type, :content, :created_at, :generator, :prompt, :attributes, :width, :height)',
+                                'INSERT INTO media_assets (category, entity_key, label, media_type, mime_type, content, created at, generator, prompt, attributes, width, height) VALUES (:category, :entity_key, :label, :media_type, :mime_type, :content, :created_at, :generator, :prompt, :attributes, :width, :height)',
                                 $params
                         );
                         $id = (int) $this->connection->lastInsertId();
@@ -649,6 +745,7 @@ final class MetadataStore
 
                 if ($id > 0)
                 {
+                        $metaParams[':attributes'] = $this->decodeAttributes($metaParams[':attributes']);
                         $this->mediaCache[$id] = array(
                                 'id' => $id,
                                 'category' => $category,
@@ -660,7 +757,7 @@ final class MetadataStore
                                 'created_at' => $now,
                                 'generator' => $metaParams[':generator'],
                                 'prompt' => $metaParams[':prompt'],
-                                'attributes' => $this->decodeAttributes($metaParams[':attributes']),
+                                'attributes' => $metaParams[':attributes'],
                                 'width' => $metaParams[':width'],
                                 'height' => $metaParams[':height'],
                         );
@@ -678,6 +775,15 @@ final class MetadataStore
                 if (isset($this->mediaCache[$id]))
                 {
                         return $this->mediaCache[$id];
+                }
+                if ($this->driver === self::DRIVER_MEMORY)
+                {
+                        if (!isset($this->memoryMedia[$id]))
+                        {
+                                return null;
+                        }
+                        $this->mediaCache[$id] = $this->memoryMedia[$id];
+                        return $this->memoryMedia[$id];
                 }
                 $statement = $this->runStatement('SELECT id, category, entity_key, label, media_type, mime_type, content, created_at FROM media_assets WHERE id = :id LIMIT 1', array(':id' => $id));
                 $row = $statement->fetch();
@@ -756,6 +862,29 @@ final class MetadataStore
                         return 0;
                 }
 
+                if ($this->driver === self::DRIVER_MEMORY)
+                {
+                        $key = $this->memoryKey($category, $entityKey);
+                        if (isset($this->memoryDescriptionKeys[$key]))
+                        {
+                                $id = (int) $this->memoryDescriptionKeys[$key];
+                                $this->memoryDescriptions[$id]['content'] = $normalized;
+                                $this->memoryDescriptions[$id]['created_at'] = microtime(true);
+                                $this->descriptionCache[$id] = $normalized;
+                                return $id;
+                        }
+                        $id = $this->nextMemoryId();
+                        $this->memoryDescriptionKeys[$key] = $id;
+                        $this->memoryDescriptions[$id] = array(
+                                'category' => $category,
+                                'entity_key' => $entityKey,
+                                'content' => $normalized,
+                                'created_at' => microtime(true),
+                        );
+                        $this->descriptionCache[$id] = $normalized;
+                        return $id;
+                }
+
                 $params = array(
                         ':category' => $category,
                         ':entity_key' => $entityKey,
@@ -792,6 +921,16 @@ final class MetadataStore
                 {
                         return $this->descriptionCache[$id];
                 }
+                if ($this->driver === self::DRIVER_MEMORY)
+                {
+                        if (!isset($this->memoryDescriptions[$id]))
+                        {
+                                return null;
+                        }
+                        $content = strval($this->memoryDescriptions[$id]['content']);
+                        $this->descriptionCache[$id] = $content;
+                        return $content;
+                }
 
                 $statement = $this->runStatement('SELECT content FROM descriptions WHERE id = :id LIMIT 1', array(':id' => $id));
                 $row = $statement->fetch();
@@ -816,6 +955,18 @@ final class MetadataStore
                 if ($normalized === '')
                 {
                         return false;
+                }
+
+                if ($this->driver === self::DRIVER_MEMORY)
+                {
+                        if (!isset($this->memoryDescriptions[$id]))
+                        {
+                                return false;
+                        }
+                        $this->memoryDescriptions[$id]['content'] = $normalized;
+                        $this->memoryDescriptions[$id]['created_at'] = microtime(true);
+                        $this->descriptionCache[$id] = $normalized;
+                        return true;
                 }
 
                 $statement = $this->runStatement('UPDATE descriptions SET content = :content, created_at = :created_at WHERE id = :id', array(
@@ -848,6 +999,38 @@ final class MetadataStore
                 if ($encodedParticipants === false)
                 {
                         $encodedParticipants = '[]';
+                }
+
+                if ($this->driver === self::DRIVER_MEMORY)
+                {
+                        $participantList = json_decode($encodedParticipants, true);
+                        if (!is_array($participantList))
+                        {
+                                $participantList = array();
+                        }
+                        $id = $this->nextMemoryId();
+                        $entry = array(
+                                'type' => $type,
+                                'text' => $normalized,
+                                'timestamp' => $timestamp,
+                                'participants' => $participantList,
+                                'category' => $category,
+                                'entity_key' => $entityKey,
+                        );
+                        $this->memoryChronicles[$id] = $entry;
+                        $key = $this->memoryKey($category, $entityKey);
+                        if (!isset($this->memoryChronicleKeys[$key]))
+                        {
+                                $this->memoryChronicleKeys[$key] = array();
+                        }
+                        $this->memoryChronicleKeys[$key][] = $id;
+                        $this->chronicleCache[$id] = array(
+                                'type' => $type,
+                                'text' => $normalized,
+                                'timestamp' => $timestamp,
+                                'participants' => $participantList,
+                        );
+                        return $id;
                 }
 
                 $params = array(
@@ -893,6 +1076,21 @@ final class MetadataStore
                 {
                         return $this->chronicleCache[$id];
                 }
+                if ($this->driver === self::DRIVER_MEMORY)
+                {
+                        if (!isset($this->memoryChronicles[$id]))
+                        {
+                                return null;
+                        }
+                        $entry = array(
+                                'type' => strval($this->memoryChronicles[$id]['type']),
+                                'text' => strval($this->memoryChronicles[$id]['text']),
+                                'timestamp' => floatval($this->memoryChronicles[$id]['timestamp']),
+                                'participants' => $this->memoryChronicles[$id]['participants'],
+                        );
+                        $this->chronicleCache[$id] = $entry;
+                        return $entry;
+                }
 
                 $statement = $this->runStatement('SELECT type, content, timestamp, participants FROM chronicles WHERE id = :id LIMIT 1', array(':id' => $id));
                 $row = $statement->fetch();
@@ -937,6 +1135,36 @@ final class MetadataStore
         {
                 if (empty($ids))
                 {
+                        return;
+                }
+                if ($this->driver === self::DRIVER_MEMORY)
+                {
+                        foreach ($ids as $id)
+                        {
+                                $key = (int) $id;
+                                if (!isset($this->memoryChronicles[$key]))
+                                {
+                                        continue;
+                                }
+                                $entry = $this->memoryChronicles[$key];
+                                unset($this->memoryChronicles[$key], $this->chronicleCache[$key]);
+                                $category = strval($entry['category']);
+                                $entity = strval($entry['entity_key']);
+                                $bucket = $this->memoryKey($category, $entity);
+                                if (isset($this->memoryChronicleKeys[$bucket]))
+                                {
+                                        $this->memoryChronicleKeys[$bucket] = array_values(array_filter(
+                                                $this->memoryChronicleKeys[$bucket],
+                                                static function ($candidate) use ($key) {
+                                                        return (int) $candidate !== $key;
+                                                }
+                                        ));
+                                        if (empty($this->memoryChronicleKeys[$bucket]))
+                                        {
+                                                unset($this->memoryChronicleKeys[$bucket]);
+                                        }
+                                }
+                        }
                         return;
                 }
                 $placeholders = array();

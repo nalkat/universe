@@ -79,13 +79,12 @@ references mentors, rivals, and shared community history. Access these strings v
 to differentiate entries in upcoming UI layers.
 
 All of this prose now lives in a repository-local metadata cache managed by
-`MetadataStore`. By default the simulator connects to the bundled PostgreSQL
-database specified in `config/metadata.php`, storing descriptions and chronicle
-entries once and referencing them by ID to dramatically reduce in-memory pressure.
-When the database is unavailable the store falls back to
-`runtime/meta/metadata.sqlite`, ensuring lore survives even on minimal setups. In
-both modes the cache deduplicates entries, enforces chronicle limits, and keeps
-description fetches hot via an in-process cache.
+`MetadataStore`. The simulator now defaults to an in-memory backend that keeps
+descriptions, chronicles, and portraits resident without touching disk, perfect for
+interactive exploration or GUI-driven browsing sessions. When persistence is required
+you can opt into the bundled SQLite database or a PostgreSQL server via
+`config/metadata.php`; both stores deduplicate entries, enforce chronicle limits, and
+serve hot description reads through the same in-process cache.
 
 ### Parallel stepping and SMP utilization
 
@@ -175,9 +174,10 @@ main browser remains responsive.
   planetary life breakdowns grouped by kingdom and phylum for rapid triage.
 - **Procedural portraits** – VisualForge paints PNG portraits for galaxies, systems,
   stars, planets, countries, cities, residents, and catalogued materials. Images are
-  stored in the metadata database (PostgreSQL by default with SQLite fallback) with
-  generator prompts, resolutions, and timestamps so the browser can surface provenance
-  alongside the artwork while falling back to analytic maps for geographic layers.
+  stored in the metadata cache (in-memory by default with optional SQLite or PostgreSQL
+  persistence) with generator prompts, resolutions, and timestamps so the browser can
+  surface provenance alongside the artwork while falling back to analytic maps for
+  geographic layers.
 - **Dedicated console** – Command output streams into a resizable console window so
   long-running runs no longer fight the catalog panes. The console retains recent
   history and supports one-click clearing without resetting the browser.
@@ -193,13 +193,15 @@ main browser remains responsive.
   manually expanding each branch.
 - **Async catalog loading** – Catalog requests now run in the background with inline
   status updates, eliminating GUI freezes when fetching massive universes or when the
-  PHP CLI emits diagnostic output alongside JSON.
+  PHP CLI emits diagnostic output alongside JSON. Stop or reset actions now cancel any
+  in-flight export so operators are never stuck waiting on a runaway catalog build.
 - **Live dynamics viewer** – The Visual tab animates orbital motion for the selected
   object, plotting velocity vectors and nearby bodies each tick without repainting the
   entire catalog tree so you can study systems in motion at leisure.
 - **Metadata configuration controls** – The detached control panel now lets you choose
-  between the bundled SQLite cache and a PostgreSQL metadata store, updating
-  `config/metadata.php` before every run so GUI and CLI sessions stay in sync.
+  between the in-memory cache, the bundled SQLite store, or a PostgreSQL metadata
+  server, updating `config/metadata.php` before every run so GUI and CLI sessions stay in
+  sync.
 
 ### Portrait generation pipeline
 
