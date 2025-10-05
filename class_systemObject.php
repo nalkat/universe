@@ -2,6 +2,8 @@
 
 class SystemObject
 {
+        use MetadataBackedNarrative;
+
         public const GRAVITATIONAL_CONSTANT = 6.67430E-11;
 
         protected $name;
@@ -15,6 +17,7 @@ class SystemObject
         protected $age;
         protected $destroyed;
         protected $destructionReason;
+        protected int $chronicleLimit = 48;
 
         public function __construct (string $name, float $mass = 0.0, float $radius = 0.0, ?array $position = null, ?array $velocity = null)
         {
@@ -29,6 +32,7 @@ class SystemObject
                 $this->age = floatval(0);
                 $this->destroyed = false;
                 $this->destructionReason = null;
+                $this->addChronicleEntry('formation', sprintf('%s entered the records with mass %.2e kg.', $this->name, $this->mass));
         }
 
         protected function sanitizeVector (?array $vector) : array
@@ -221,6 +225,20 @@ class SystemObject
                 $dy = $this->position['y'] - $other['y'];
                 $dz = $this->position['z'] - $other['z'];
                 return sqrt(($dx * $dx) + ($dy * $dy) + ($dz * $dz));
+        }
+
+        public function appendDescription (string $fragment) : void
+        {
+                $fragment = trim(strval($fragment));
+                if ($fragment === '') return;
+                $current = $this->getDescription();
+                if ($current === '')
+                {
+                        $this->setDescription($fragment);
+                        return;
+                }
+                $delimiter = (substr($current, -1) === '.') ? ' ' : '. ';
+                $this->setDescription($current . $delimiter . $fragment);
         }
 
         public function getGravitationalParameter () : float

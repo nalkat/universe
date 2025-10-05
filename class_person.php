@@ -1,6 +1,14 @@
 <?php // 7.3.0-dev
 class Person extends Life
 {
+        use MetadataBackedNarrative {
+                addChronicleEntry as private recordChronicleEntry;
+                importChronicle as private metadataImportChronicle;
+                getChronicle as private metadataGetChronicle;
+                setDescription as private metadataSetDescription;
+                getDescription as private metadataGetDescription;
+        }
+
         private $homeCountry;
         private $skills;
         private $profession;
@@ -12,9 +20,17 @@ class Person extends Life
         private $senescenceStartYears;
         private $agingInterval;
         private $agingAccumulator;
+        private $nutritionCadenceFactor;
+        private $agingCadenceFactor;
         private $mortalityModel;
         private $resilienceExperience;
         private $calmAccumulator;
+        private ?int $backstoryId;
+        private $relationships;
+        protected int $chronicleLimit = 64;
+        private $netWorth;
+        private $coordinates;
+        private $residenceCity;
 
         public function __construct (string $name, ?Country $homeCountry = null, array $traits = array())
         {
@@ -26,13 +42,20 @@ class Person extends Life
                 $this->hunger = 0.25;
                 $this->dailyFoodNeed = max(0.1, floatval($traits['daily_food_need'] ?? 1.0));
                 $this->nutritionInterval = max(1.0, floatval($traits['nutrition_interval'] ?? 86400.0));
+                $this->nutritionCadenceFactor = max(0.1, $this->nutritionInterval / 86400.0);
                 $this->lifeExpectancyYears = max(35.0, floatval($traits['life_expectancy_years'] ?? 82.0));
                 $this->senescenceStartYears = max(25.0, min($this->lifeExpectancyYears, floatval($traits['senescence_years'] ?? 65.0)));
                 $this->agingInterval = max(3600.0, floatval($traits['aging_interval'] ?? 86400.0));
                 $this->agingAccumulator = 0.0;
+                $this->agingCadenceFactor = max(0.05, $this->agingInterval / 86400.0);
                 $this->mortalityModel = strtolower(trim(strval($traits['mortality'] ?? 'finite')));
                 $this->resilienceExperience = 0.0;
                 $this->calmAccumulator = 0.0;
+                $this->backstoryId = null;
+                $this->relationships = array();
+                $this->netWorth = max(0.0, floatval($traits['net_worth'] ?? 0.0));
+                $this->coordinates = null;
+                $this->residenceCity = null;
                 if ($this->mortalityModel === '')
                 {
                         $this->mortalityModel = 'finite';
@@ -49,17 +72,83 @@ class Person extends Life
                 {
                         $this->setHomeCountry($homeCountry);
                 }
+                else
+                {
+                        $this->synchronizeWithPlanetTimekeeping();
+                }
                 $this->addSkill('survival', 0.2);
         }
 
         public function setHomeCountry (?Country $country) : void
         {
                 $this->homeCountry = $country;
+                $this->synchronizeWithPlanetTimekeeping();
         }
 
         public function getHomeCountry () : ?Country
         {
                 return $this->homeCountry;
+        }
+
+        public function synchronizeWithPlanetTimekeeping () : void
+        {
+                $dayLength = $this->resolveLocalDayLengthSeconds();
+                $yearLength = $this->resolveLocalYearLengthSeconds();
+                $this->nutritionInterval = max(600.0, $dayLength * max(0.1, $this->nutritionCadenceFactor));
+                $this->agingInterval = max(3600.0, $dayLength * max(0.05, $this->agingCadenceFactor));
+                $this->agingAccumulator = min($this->agingAccumulator, $this->agingInterval);
+                $calmThreshold = $this->getCalmThresholdSeconds();
+                if ($calmThreshold > 0.0 && $this->calmAccumulator > $calmThreshold)
+                {
+                        $this->calmAccumulator = fmod($this->calmAccumulator, $calmThreshold);
+                }
+                $this->setTrait('nutrition_interval', $this->nutritionInterval);
+                $this->setTrait('aging_interval', $this->agingInterval);
+                $this->setTrait('local_year_seconds', $yearLength);
+        }
+
+        private function getHomePlanet () : ?Planet
+        {
+                if ($this->homeCountry instanceof Country)
+                {
+                        return $this->homeCountry->getPlanet();
+                }
+                return null;
+        }
+
+        private function resolveLocalDayLengthSeconds () : float
+        {
+                $planet = $this->getHomePlanet();
+                if ($planet instanceof Planet)
+                {
+                        return max(3600.0, $planet->getDayLengthSeconds(true));
+                }
+                return 86400.0;
+        }
+
+        private function resolveLocalYearLengthSeconds () : float
+        {
+                $planet = $this->getHomePlanet();
+                if ($planet instanceof Planet)
+                {
+                        return max($this->resolveLocalDayLengthSeconds(), $planet->getYearLengthSeconds(true));
+                }
+                return 31557600.0;
+        }
+
+        private function convertUniversalToLocalSeconds (float $seconds) : float
+        {
+                $planet = $this->getHomePlanet();
+                if ($planet instanceof Planet)
+                {
+                        return $planet->convertUniversalToLocalSeconds($seconds);
+                }
+                return $seconds;
+        }
+
+        private function getCalmThresholdSeconds () : float
+        {
+                return $this->resolveLocalDayLengthSeconds() * 7.0;
         }
 
         public function setProfession (?string $profession) : void
@@ -106,6 +195,69 @@ class Person extends Life
         public function getJob () : ?Job
         {
                 return $this->job;
+        }
+
+        public function setResidenceCity (?City $city) : void
+        {
+                if ($this->residenceCity === $city)
+                {
+                        return;
+                }
+
+                $this->residenceCity = $city;
+                if ($city instanceof City)
+                {
+                        $coords = $city->getCoordinates();
+                        $this->setCoordinates($this->scatterWithinCity($coords, $city->getRadius()));
+                }
+        }
+
+        public function getResidenceCity () : ?City
+        {
+                return $this->residenceCity;
+        }
+
+        public function setCoordinates (?array $coordinates) : void
+        {
+                if ($coordinates === null)
+                {
+                        $this->coordinates = null;
+                        return;
+                }
+                $latitude = floatval($coordinates['latitude'] ?? ($coordinates['lat'] ?? 0.0));
+                $longitude = floatval($coordinates['longitude'] ?? ($coordinates['lon'] ?? 0.0));
+                $this->coordinates = array('latitude' => $latitude, 'longitude' => $longitude);
+                $this->setTrait('latitude', $latitude);
+                $this->setTrait('longitude', $longitude);
+        }
+
+        public function getCoordinates () : ?array
+        {
+                if ($this->coordinates === null)
+                {
+                        return null;
+                }
+                return $this->coordinates;
+        }
+
+        public function setNetWorth (float $amount) : void
+        {
+                $this->netWorth = max(0.0, $amount);
+                $this->setTrait('net_worth', $this->netWorth);
+        }
+
+        public function adjustNetWorth (float $delta) : void
+        {
+                if ($delta === 0.0)
+                {
+                        return;
+                }
+                $this->setNetWorth($this->netWorth + $delta);
+        }
+
+        public function getNetWorth () : float
+        {
+                return $this->netWorth;
         }
 
         public function addSkill (string $name, float $level = 0.0) : void
@@ -163,6 +315,115 @@ class Person extends Life
                 return $this->skills;
         }
 
+        public function setBackstory (string $backstory) : void
+        {
+                $normalized = trim(strval($backstory));
+                if ($normalized === '')
+                {
+                        $this->backstoryId = null;
+                        $this->setTrait('backstory', '');
+                        return;
+                }
+                $store = MetadataStore::instance();
+                $key = $this->narrativeKey() . ':backstory';
+                $changed = false;
+                if ($this->backstoryId !== null)
+                {
+                        $current = $store->fetchDescription($this->backstoryId);
+                        if ($current !== $normalized)
+                        {
+                                $changed = $store->updateDescription($this->backstoryId, $normalized);
+                                if (!$changed)
+                                {
+                                        $inserted = $store->storeDescription($normalized, 'PersonBackstory', $key);
+                                        if ($inserted > 0)
+                                        {
+                                                $this->backstoryId = $inserted;
+                                                $changed = true;
+                                        }
+                                }
+                        }
+                }
+                else
+                {
+                        $inserted = $store->storeDescription($normalized, 'PersonBackstory', $key);
+                        if ($inserted > 0)
+                        {
+                                $this->backstoryId = $inserted;
+                                $changed = true;
+                        }
+                }
+                $this->setTrait('backstory', $normalized);
+                if ($changed)
+                {
+                        $this->recordChronicleEntry('backstory', $normalized, null, array($this->getName()));
+                }
+        }
+
+        public function getBackstory () : string
+        {
+                if ($this->backstoryId === null)
+                {
+                        return '';
+                }
+                $fetched = MetadataStore::instance()->fetchDescription($this->backstoryId);
+                return ($fetched === null) ? '' : $fetched;
+        }
+
+        public function addRelationship (string $role, string $name) : void
+        {
+                $key = Utility::cleanse_string($role);
+                if ($key === '') return;
+                $this->relationships[$key] = strval($name);
+                $this->addChronicleEntry('relationship', sprintf('%s acknowledged %s as %s.', $this->getName(), strval($name), $key));
+        }
+
+        public function getRelationships () : array
+        {
+                return $this->relationships;
+        }
+
+        public function addChronicleEntry (string $type, string $text, ?float $timestamp = null, array $participants = array())
+: void
+        {
+                $normalized = trim(strval($text));
+                if ($normalized === '') return;
+                $participantList = array();
+                if (!empty($participants) && is_array($participants))
+                {
+                        $participantList = array_map('strval', $participants);
+                }
+                $participantList = array_values(array_unique(array_merge(array($this->getName()), $participantList)));
+                $resolvedTimestamp = ($timestamp === null) ? $this->age : floatval($timestamp);
+                $this->recordChronicleEntry($type, $normalized, $resolvedTimestamp, $participantList);
+        }
+
+        public function getChronicle (?int $limit = null) : array
+        {
+                $entries = $this->metadataGetChronicle();
+                $entries[] = array(
+                        'type' => 'status',
+                        'text' => sprintf('%s is %.1f local years into their journey.', $this->getName(), $this->getAgeInYears()),
+                        'timestamp' => $this->age,
+                        'participants' => array($this->getName()),
+                        'synthetic' => true
+                );
+                if ($this->isAlive() === false)
+                {
+                        $entries[] = array(
+                                'type' => 'status',
+                                'text' => sprintf('%s currently rests beyond the mortal coil.', $this->getName()),
+                                'timestamp' => $this->age,
+                                'participants' => array($this->getName()),
+                                'synthetic' => true
+                        );
+                }
+                if ($limit === null) return $entries;
+                $limit = max(0, intval($limit));
+                if ($limit === 0) return array();
+                return array_slice($entries, -$limit);
+        }
+
         public function tick (float $deltaTime = 1.0) : void
         {
                 parent::tick($deltaTime);
@@ -180,15 +441,19 @@ class Person extends Life
                 }
                 if ($deltaTime <= 0) return;
 
+                $localDelta = $this->convertUniversalToLocalSeconds($deltaTime);
+                if ($localDelta <= 0) return;
+
                 foreach ($this->skills as $skill)
                 {
-                        $skill->tick($deltaTime);
+                        $skill->tick($localDelta);
                 }
 
-                $hungerDrift = ($deltaTime / $this->nutritionInterval);
+                $hungerDrift = ($localDelta / $this->nutritionInterval);
                 $hungerDrift *= max(0.3, 1.0 - ($this->getResilience() * 0.25));
                 $this->hunger += $hungerDrift;
-                $foodNeeded = $this->dailyFoodNeed * ($deltaTime / 86400.0);
+                $dayLength = $this->resolveLocalDayLengthSeconds();
+                $foodNeeded = $this->dailyFoodNeed * (($dayLength > 0.0) ? ($localDelta / $dayLength) : 0.0);
                 $foodReceived = 0.0;
                 if ($this->homeCountry instanceof Country)
                 {
@@ -204,15 +469,15 @@ class Person extends Life
                 }
                 else
                 {
-                        $this->recoverHealth($deltaTime);
+                        $this->recoverHealth($localDelta);
                 }
-                $this->agingAccumulator += $deltaTime;
+                $this->agingAccumulator += $localDelta;
                 if ($this->agingAccumulator >= $this->agingInterval)
                 {
                         $this->applyAging($this->agingAccumulator);
                         $this->agingAccumulator = 0.0;
                 }
-                $this->processResilienceGrowth($deltaTime);
+                $this->processResilienceGrowth($localDelta);
         }
 
         private function satiate (float $consumed) : void
@@ -231,7 +496,8 @@ class Person extends Life
                 $resilience = $this->getResilience();
                 $hungerMultiplier = max(0.25, 1.0 - ($resilience * 0.4));
                 $this->hunger += $increase * $hungerMultiplier;
-                $timeFactor = max(0.1, $deltaTime / 86400.0);
+                $dayLength = $this->resolveLocalDayLengthSeconds();
+                $timeFactor = ($dayLength > 0.0) ? max(0.1, $deltaTime / $dayLength) : 0.1;
                 $damageMitigation = max(0.25, 1.0 - ($resilience * 0.65));
                 $damage = $increase * 0.12 * $timeFactor * $damageMitigation;
                 $this->modifyHealth(-$damage);
@@ -248,7 +514,8 @@ class Person extends Life
         private function recoverHealth (float $deltaTime) : void
         {
                 if ($this->hunger > 0.8) return;
-                $timeFactor = $deltaTime / 86400.0;
+                $dayLength = $this->resolveLocalDayLengthSeconds();
+                $timeFactor = ($dayLength > 0.0) ? ($deltaTime / $dayLength) : 0.0;
                 if ($timeFactor <= 0) return;
                 $recoveryBoost = 1.0 + ($this->getResilience() * 0.6);
                 $this->modifyHealth(0.02 * $timeFactor * $recoveryBoost);
@@ -257,12 +524,14 @@ class Person extends Life
         private function applyAging (float $elapsedSeconds) : void
         {
                 if ($this->isImmortal()) return;
-                $ageYears = $this->age / 31557600.0;
+                $yearLength = $this->resolveLocalYearLengthSeconds();
+                $localAge = $this->convertUniversalToLocalSeconds($this->age);
+                $ageYears = ($yearLength > 0.0) ? ($localAge / $yearLength) : 0.0;
                 if ($ageYears < $this->senescenceStartYears) return;
                 $span = max(1.0, $this->lifeExpectancyYears - $this->senescenceStartYears);
                 $excess = max(0.0, $ageYears - $this->senescenceStartYears);
                 $pressure = min(2.0, $excess / $span);
-                $timeFactor = $elapsedSeconds / 31557600.0;
+                $timeFactor = ($yearLength > 0.0) ? ($elapsedSeconds / $yearLength) : 0.0;
                 $damage = max(0.0, $pressure * 0.05 * $timeFactor);
                 if ($damage > 0.0)
                 {
@@ -289,6 +558,34 @@ class Person extends Life
         public function getMortalityModel () : string
         {
                 return $this->mortalityModel;
+        }
+
+        public function getAgeInYears () : float
+        {
+                $yearLength = $this->resolveLocalYearLengthSeconds();
+                if ($yearLength <= 0.0) return 0.0;
+                $localAge = $this->convertUniversalToLocalSeconds($this->age);
+                return $localAge / $yearLength;
+        }
+
+        public function getLifeExpectancyYears () : float
+        {
+                return $this->lifeExpectancyYears;
+        }
+
+        public function getLifeExpectancySeconds () : float
+        {
+                return $this->lifeExpectancyYears * $this->resolveLocalYearLengthSeconds();
+        }
+
+        public function getSenescenceStartYears () : float
+        {
+                return $this->senescenceStartYears;
+        }
+
+        public function getSenescenceStartSeconds () : float
+        {
+                return $this->senescenceStartYears * $this->resolveLocalYearLengthSeconds();
         }
 
         public function sufferTrauma (float $severity, string $cause) : void
@@ -328,9 +625,11 @@ class Person extends Life
                         return;
                 }
                 $this->calmAccumulator += $deltaTime;
-                if ($this->calmAccumulator >= 604800.0)
+                $calmThreshold = $this->getCalmThresholdSeconds();
+                if ($calmThreshold <= 0) return;
+                if ($this->calmAccumulator >= $calmThreshold)
                 {
-                        $periods = floor($this->calmAccumulator / 604800.0);
+                        $periods = floor($this->calmAccumulator / $calmThreshold);
                         if ($periods > 0)
                         {
                                 $decay = min(0.05, $periods * 0.01);
@@ -338,9 +637,28 @@ class Person extends Life
                                 {
                                         parent::reduceResilience($decay);
                                 }
-                                $this->calmAccumulator -= ($periods * 604800.0);
+                                $this->calmAccumulator -= ($periods * $calmThreshold);
                         }
                 }
+        }
+
+        private function scatterWithinCity (array $coordinates, float $radius) : array
+        {
+                $latitude = floatval($coordinates['latitude'] ?? 0.0);
+                $longitude = floatval($coordinates['longitude'] ?? 0.0);
+                $spread = max(0.1, $radius * 0.05);
+                $latitude += mt_rand(-1000, 1000) / 1000.0 * $spread;
+                $longitude += mt_rand(-1000, 1000) / 1000.0 * $spread;
+                $latitude = max(-90.0, min(90.0, $latitude));
+                if ($longitude < -180.0)
+                {
+                        $longitude += 360.0;
+                }
+                elseif ($longitude > 180.0)
+                {
+                        $longitude -= 360.0;
+                }
+                return array('latitude' => $latitude, 'longitude' => $longitude);
         }
 }
 ?>

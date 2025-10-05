@@ -1,6 +1,14 @@
 <?php // 7.3.0-dev
 class Country
 {
+        use MetadataBackedNarrative {
+                addChronicleEntry as private recordChronicleEntry;
+                importChronicle as private metadataImportChronicle;
+                getChronicle as private metadataGetChronicle;
+                setDescription as private metadataSetDescription;
+                getDescription as private metadataGetDescription;
+        }
+
         private $name;
         private $planet;
         private $infrastructure;
@@ -19,6 +27,10 @@ class Country
         private $immortalityChance;
         private $adaptationLevel;
         private $adaptationAccumulator;
+        private $culturalBackdrop;
+        protected int $chronicleLimit = 64;
+        private $territory;
+        private $cities;
 
         public function __construct (string $name, Planet $planet, array $profile = array())
         {
@@ -45,8 +57,14 @@ class Country
                 $this->immortalityChance = $this->sanitizeFraction($profile['immortality_chance'] ?? 0.0);
                 $this->adaptationLevel = $this->sanitizeFraction($profile['adaptation'] ?? 0.0);
                 $this->adaptationAccumulator = 0.0;
+                $this->culturalBackdrop = array();
+                $this->territory = $this->generateTerritoryProfile($profile['territory'] ?? null);
+                $this->cities = array();
                 $this->planet->registerCountry($this);
                 $this->initializeEconomy();
+                $this->initializeLore();
+                $this->generateCities($profile['cities'] ?? array());
+                $this->synchronizeWithPlanetTimekeeping();
         }
 
         public function getName () : string
@@ -57,6 +75,44 @@ class Country
         public function getPlanet () : Planet
         {
                 return $this->planet;
+        }
+
+        public function getLocalDayLengthSeconds () : float
+        {
+                return max(1.0, $this->planet->getDayLengthSeconds(true));
+        }
+
+        public function getLocalYearLengthSeconds () : float
+        {
+                return max($this->getLocalDayLengthSeconds(), $this->planet->getYearLengthSeconds(true));
+        }
+
+        public function getLocalHourLengthSeconds () : float
+        {
+                return max(1.0, $this->planet->getHourLengthSeconds(true));
+        }
+
+        private function getLocalWeekLengthSeconds () : float
+        {
+                return $this->getLocalDayLengthSeconds() * 7.0;
+        }
+
+        public function convertUniversalToLocalSeconds (float $seconds) : float
+        {
+                return $this->planet->convertUniversalToLocalSeconds($seconds);
+        }
+
+        public function synchronizeWithPlanetTimekeeping () : void
+        {
+                $day = $this->getLocalDayLengthSeconds();
+                $this->populationSeedTimer = min($this->populationSeedTimer, $day);
+                foreach ($this->people as $person)
+                {
+                        if ($person instanceof Person)
+                        {
+                                $person->synchronizeWithPlanetTimekeeping();
+                        }
+                }
         }
 
         public function getPopulation () : int
@@ -110,8 +166,37 @@ class Country
                         'adaptation' => $this->adaptationLevel,
                         'population_capacity' => $this->populationCapacity,
                         'population' => $this->population,
-                        'stockpiles' => $this->resourceStockpiles
+                        'stockpiles' => $this->resourceStockpiles,
+                        'net_worth' => $this->getNetWorth(),
+                        'territory' => $this->territory
                 );
+        }
+
+        public function getTerritoryProfile () : array
+        {
+                return $this->territory;
+        }
+
+        public function getCities () : array
+        {
+                return array_values($this->cities);
+        }
+
+        public function getNetWorth () : float
+        {
+                $wealth = $this->resourceStockpiles['wealth'] ?? 0.0;
+                foreach ($this->people as $person)
+                {
+                        if (!($person instanceof Person)) continue;
+                        $wealth += $person->getNetWorth();
+                }
+                return max(0.0, $wealth);
+        }
+
+        public function getWealthPerCapita () : float
+        {
+                $population = max(1, $this->population);
+                return $this->getNetWorth() / $population;
         }
 
         public function getAdaptationLevel () : float
@@ -174,6 +259,9 @@ class Country
                         $traits = $this->generateCitizenTraits();
                         $person = new Person($name, $this, $traits);
                         $this->people[] = $person;
+                        $this->assignCitizenBackstory($person);
+                        $this->assignCitizenWealth($person);
+                        $this->assignCitizenToCity($person);
                         $created[] = $person;
                 }
                 $this->population = count($this->people);
@@ -189,6 +277,30 @@ class Country
         public function getJobs () : array
         {
                 return $this->jobs;
+        }
+
+        public function getDescription () : string
+        {
+                $segments = array();
+                $foundation = trim(strval($this->culturalBackdrop['foundation'] ?? ''));
+                if ($foundation !== '') $segments[] = $foundation;
+                $hook = trim(strval($this->culturalBackdrop['hook'] ?? ''));
+                if ($hook !== '') $segments[] = $hook;
+                $resource = trim(strval($this->culturalBackdrop['resource'] ?? ''));
+                if ($resource !== '') $segments[] = $resource;
+                $recent = $this->extractRecentChronicleLine();
+                if ($recent !== '' && !in_array($recent, $segments, true)) $segments[] = $recent;
+                return implode(' ', $segments);
+        }
+
+        public function getChronicle () : array
+        {
+                return $this->metadataGetChronicle();
+        }
+
+        public function getCulturalBackdrop () : array
+        {
+                return $this->culturalBackdrop;
         }
 
         public function addJob (Job $job) : void
@@ -265,16 +377,28 @@ class Country
         public function tick (float $deltaTime = 1.0) : void
         {
                 if ($deltaTime <= 0) return;
-                $progress = $deltaTime * $this->developmentRate * 0.0001;
+                $localDelta = $this->convertUniversalToLocalSeconds($deltaTime);
+                if ($localDelta <= 0)
+                {
+                        foreach ($this->people as $person)
+                        {
+                                if ($person instanceof Person)
+                                {
+                                        $person->tick($deltaTime);
+                                }
+                        }
+                        return;
+                }
+                $progress = $localDelta * $this->developmentRate * 0.0001;
                 $this->improveInfrastructure($progress);
                 $this->improveTechnology($progress * 0.9);
                 $this->improveResources($progress * 0.8);
                 $this->improveStability($progress * 0.85);
                 $this->rebalanceEmployment();
-                $this->runEconomy($deltaTime);
-                $this->investInAdaptation($deltaTime);
-                $this->advancePopulation($deltaTime);
-                $this->processAdaptation($deltaTime);
+                $this->runEconomy($localDelta);
+                $this->investInAdaptation($localDelta);
+                $this->advancePopulation($localDelta);
+                $this->processAdaptation($localDelta);
                 $alive = array();
                 foreach ($this->people as $person)
                 {
@@ -284,6 +408,11 @@ class Country
                         {
                                 $alive[] = $person;
                                 continue;
+                        }
+                        $city = $person->getResidenceCity();
+                        if ($city instanceof City)
+                        {
+                                $city->removeResident($person);
                         }
                         $this->population--;
                 }
@@ -320,7 +449,228 @@ class Country
                         $variance = ((mt_rand() / mt_getrandmax()) - 0.5) * 0.2;
                         $traits['resilience'] = max(0.0, min(1.0, $baseResilience + $variance));
                 }
+                $longevity = $this->estimateCitizenLongevity();
+                if ($longevity !== null)
+                {
+                        $lifeSpread = max(2.0, $longevity['expectancy'] * 0.1);
+                        $lifeRoll = ((mt_rand() / mt_getrandmax()) - 0.5) * $lifeSpread;
+                        $lifeExpectancy = max(24.0, $longevity['expectancy'] + $lifeRoll);
+                        $senescenceSpread = max(1.0, $longevity['senescence'] * 0.08);
+                        $senescenceRoll = ((mt_rand() / mt_getrandmax()) - 0.5) * $senescenceSpread;
+                        $senescenceAge = max(18.0, min($lifeExpectancy - 2.0, $longevity['senescence'] + $senescenceRoll));
+                        $traits['life_expectancy_years'] = $lifeExpectancy;
+                        $traits['senescence_years'] = $senescenceAge;
+                }
                 return $traits;
+        }
+
+        private function assignCitizenWealth (Person $person) : void
+        {
+                $nationalWealth = max(0.0, $this->resourceStockpiles['wealth'] ?? 0.0);
+                $populationBaseline = ($this->populationCapacity > 0)
+                        ? $this->populationCapacity
+                        : max(1, count($this->people));
+                $baseline = ($nationalWealth > 0.0)
+                        ? max(20.0, $nationalWealth / $populationBaseline)
+                        : 40.0 + (($this->technology + $this->infrastructure) * 35.0);
+                $variance = 0.5 + (mt_rand(0, 100) / 100.0);
+                $stabilityFactor = 0.6 + ($this->stability * 0.5);
+                $developmentFactor = 0.7 + ($this->getDevelopmentScore() * 0.6);
+                $wealth = $baseline * $variance * $stabilityFactor * $developmentFactor;
+                if ($person->getProfession() !== null)
+                {
+                        $wealth *= 1.15;
+                }
+                $person->setNetWorth($wealth);
+        }
+
+        private function assignCitizenToCity (Person $person) : void
+        {
+                if (!($person instanceof Person)) return;
+                if (empty($this->cities))
+                {
+                        $this->generateCities(array());
+                }
+                $city = $this->selectCityForResident();
+                if ($city instanceof City)
+                {
+                        $city->addResident($person);
+                        $person->setResidenceCity($city);
+                }
+        }
+
+        private function selectCityForResident () : ?City
+        {
+                $choice = null;
+                $lowest = null;
+                foreach ($this->cities as $city)
+                {
+                        if (!($city instanceof City)) continue;
+                        $population = $city->getPopulation();
+                        if ($choice === null || $population < $lowest)
+                        {
+                                $choice = $city;
+                                $lowest = $population;
+                        }
+                }
+                if ($choice instanceof City)
+                {
+                        return $choice;
+                }
+                if (empty($this->cities))
+                {
+                        return null;
+                }
+                $index = array_rand($this->cities);
+                $city = $this->cities[$index];
+                return ($city instanceof City) ? $city : null;
+        }
+
+        private function generateCities (array $profile) : void
+        {
+                if (!empty($this->cities))
+                {
+                        return;
+                }
+                $requested = intval($profile['count'] ?? 0);
+                if ($requested <= 0)
+                {
+                        $capacity = max(1, ($this->populationCapacity > 0) ? $this->populationCapacity : 2000);
+                        $requested = max(3, min(16, intval(round($capacity / 800)) + 2));
+                }
+                $names = array();
+                if (!empty($profile['names']) && is_array($profile['names']))
+                {
+                        $names = array_values($profile['names']);
+                }
+
+                for ($i = 0; $i < $requested; $i++)
+                {
+                        $name = $names[$i] ?? $this->generateCityName($i + 1);
+                        $radius = max(4.0, mt_rand(20, 80) / 2.0);
+                        $location = $this->randomizeCityCoordinates(null, $radius);
+                        $city = new City($name, array(
+                                'population' => 0,
+                                'radius' => $radius,
+                                'location' => array(
+                                        'latitude' => $location['latitude'],
+                                        'longitude' => $location['longitude']
+                                )
+                        ));
+                        $city->setRadius($radius);
+                        $city->setLocation($location);
+                        $this->cities[$city->getName()] = $city;
+                        $this->recordChronicleEntry(
+                                'city_foundation',
+                                $city->getName() . ' chartered within ' . $this->name . '.',
+                                microtime(true),
+                                array($city->getName())
+                        );
+                }
+        }
+
+        private function generateCityName (int $index) : string
+        {
+                $prefixes = array('New', 'North', 'Port', 'Lake', 'Fort', 'Star', 'Silver', 'Aurora', 'Sky', 'River');
+                $cores = array('Vale', 'Reach', 'Harbor', 'Hold', 'Haven', 'Grove', 'Spire', 'Landing', 'Crest', 'Forge');
+                $prefix = $prefixes[mt_rand(0, count($prefixes) - 1)];
+                $core = $cores[mt_rand(0, count($cores) - 1)];
+                return sprintf('%s %s %d', $prefix, $core, $index);
+        }
+
+        private function randomizeCityCoordinates (?array $center, float $radius) : array
+        {
+                if ($center === null)
+                {
+                        $center = $this->territory['center'] ?? array('latitude' => 0.0, 'longitude' => 0.0);
+                }
+                $span = $this->territory['span'] ?? array('latitude' => 18.0, 'longitude' => 28.0);
+                $latSpread = max(1.0, floatval($span['latitude'] ?? 18.0) / 2.5);
+                $lonSpread = max(1.0, floatval($span['longitude'] ?? 28.0) / 2.5);
+                $latitude = floatval($center['latitude'] ?? ($center['lat'] ?? 0.0));
+                $longitude = floatval($center['longitude'] ?? ($center['lon'] ?? 0.0));
+                $latitude += (mt_rand(-1000, 1000) / 1000.0) * $latSpread;
+                $longitude += (mt_rand(-1000, 1000) / 1000.0) * $lonSpread;
+                $latitude = max(-90.0, min(90.0, $latitude));
+                $longitude = $this->normalizeLongitude($longitude);
+                return array('latitude' => $latitude, 'longitude' => $longitude);
+        }
+
+        private function generateTerritoryProfile ($profile) : array
+        {
+                $climate = $this->planet->describeClimate();
+                $center = array(
+                        'latitude' => floatval($profile['center']['latitude'] ?? ($profile['center']['lat'] ?? mt_rand(-6000, 6000) / 100.0)),
+                        'longitude' => floatval($profile['center']['longitude'] ?? ($profile['center']['lon'] ?? mt_rand(-18000, 18000) / 100.0))
+                );
+                $center['latitude'] = max(-90.0, min(90.0, $center['latitude']));
+                $center['longitude'] = $this->normalizeLongitude($center['longitude']);
+                $span = array(
+                        'latitude' => max(6.0, floatval($profile['span']['latitude'] ?? mt_rand(600, 2600) / 10.0)),
+                        'longitude' => max(8.0, floatval($profile['span']['longitude'] ?? mt_rand(900, 3600) / 10.0))
+                );
+                $biome = strval($profile['biome'] ?? ($climate['biome_descriptor'] ?? 'continental'));
+                $terrain = strval($profile['terrain'] ?? $this->randomTerrainDescriptor($biome));
+                return array(
+                        'center' => $center,
+                        'span' => $span,
+                        'biome' => $biome,
+                        'terrain' => $terrain
+                );
+        }
+
+        private function normalizeLongitude (float $longitude) : float
+        {
+                while ($longitude < -180.0)
+                {
+                        $longitude += 360.0;
+                }
+                while ($longitude > 180.0)
+                {
+                        $longitude -= 360.0;
+                }
+                return $longitude;
+        }
+
+        private function randomTerrainDescriptor (string $biome) : string
+        {
+                $biome = strtolower(trim($biome));
+                $options = array(
+                        'desert' => array('dune seas', 'stony basins', 'salt flats', 'oasis chains'),
+                        'glacial expanse' => array('ice shelf plateaus', 'frozen archipelagos', 'permafrost ridges'),
+                        'tropical' => array('rainforest canopy', 'mangrove deltas', 'coral archipelagos'),
+                        'sun-baked plateau' => array('mesa fields', 'dust steppes', 'scarlet cliffs'),
+                        'oceanic' => array('atoll clusters', 'kelp forests', 'tidal marshes'),
+                        'continental' => array('rolling plains', 'river valleys', 'ancient highlands'),
+                        'semi-arid steppe' => array('wind-scoured prairies', 'sagebrush flats', 'basalt mesas'),
+                        'volcanic badlands' => array('igneous terraces', 'obsidian barrens', 'smoldering calderas'),
+                        'glacial' => array('alpine ridges', 'glittering fjords', 'crystal tundra')
+                );
+                $pool = $options[$biome] ?? $options['continental'];
+                return $pool[mt_rand(0, count($pool) - 1)];
+        }
+
+        private function estimateCitizenLongevity () : ?array
+        {
+                $habitability = max(0.0, min(1.0, $this->planet->getHabitabilityScore()));
+                $climate = $this->planet->describeClimate();
+                $variance = floatval($climate['variance'] ?? 0.0);
+                $rate = $this->planet->getRelativeTimeRate();
+                $base = 62.0 + ($habitability * 28.0) - ($variance * 10.0);
+                $base += ($this->technology * 12.0) + ($this->infrastructure * 9.0);
+                $base += ($this->resourceIndex * 6.0) + ($this->stability * 5.0);
+                $base += $this->adaptationLevel * 14.0;
+                if ($rate < 1.0)
+                {
+                        $base += (1.0 - $rate) * 4.0;
+                }
+                elseif ($rate > 1.0)
+                {
+                        $base -= min(10.0, ($rate - 1.0) * 6.0);
+                }
+                $base = max(30.0, min(118.0, $base));
+                $senescence = max(22.0, min($base - 3.0, $base * (0.58 + $habitability * 0.22)));
+                return array('expectancy' => $base, 'senescence' => $senescence);
         }
 
         private function initializeEconomy () : void
@@ -350,6 +700,175 @@ class Country
                         'capacity' => 0,
                         'priority' => 5
                 )));
+        }
+
+        private function initializeLore () : void
+        {
+                $climate = $this->planet->describeClimate();
+                $planetDescription = $this->planet->getDescription();
+                $foundation = sprintf(
+                        '%s was founded amidst the %s reaches of %s %s.',
+                        $this->name,
+                        $climate['biome_descriptor'] ?? 'continental',
+                        $this->planet->getName(),
+                        $climate['seasonality_phrase'] ?? 'with steady seasons'
+                );
+                $life = trim(strval($climate['life_phrase'] ?? ''));
+                if ($life !== '')
+                {
+                        $foundation .= ' ' . $life;
+                }
+                $this->culturalBackdrop = array(
+                        'climate' => $climate,
+                        'planet_description' => $planetDescription,
+                        'foundation' => $foundation,
+                        'hook' => trim(strval($climate['community_hook'] ?? '')),
+                        'resource' => trim(strval($climate['resource_phrase'] ?? ''))
+                );
+                $this->metadataImportChronicle(array());
+                $this->addChronicleEntry('foundation', $foundation);
+                if ($this->culturalBackdrop['hook'] !== '')
+                {
+                        $this->addChronicleEntry('tradition', $this->culturalBackdrop['hook']);
+                }
+                if ($this->culturalBackdrop['resource'] !== '')
+                {
+                        $this->addChronicleEntry('resources', $this->culturalBackdrop['resource']);
+                }
+        }
+
+        private function assignCitizenBackstory (Person $person) : void
+        {
+                $climate = $this->culturalBackdrop['climate'] ?? $this->planet->describeClimate();
+                $adjective = $climate['climate_adjective'] ?? 'temperate';
+                $biome = $climate['biome_descriptor'] ?? 'lands';
+                $seasonality = $climate['seasonality_phrase'] ?? 'with steady seasons';
+                $intro = sprintf(
+                        '%s grew up amid the %s %s of %s %s.',
+                        $person->getName(),
+                        $adjective,
+                        $biome,
+                        $this->name,
+                        $seasonality
+                );
+                $hook = trim(strval($this->culturalBackdrop['hook'] ?? ''));
+                $resource = trim(strval($this->culturalBackdrop['resource'] ?? ''));
+                $eventLine = $this->extractRecentChronicleLine();
+                $connections = $this->selectCommunityConnections($person);
+                $connectionLines = array();
+                $participants = array($person->getName());
+                foreach ($connections as $connection)
+                {
+                        $line = $this->composeConnectionLine($person, $connection['person'], $connection['role']);
+                        if ($line !== '')
+                        {
+                                $connectionLines[] = $line;
+                        }
+                        $role = $connection['role'];
+                        $otherName = $connection['person']->getName();
+                        $person->addRelationship($role, $otherName);
+                        $participants[] = $otherName;
+                }
+                $segments = array($intro);
+                if ($hook !== '') $segments[] = $hook;
+                if ($resource !== '') $segments[] = $resource;
+                if ($eventLine !== '') $segments[] = $eventLine;
+                $segments = array_merge($segments, $connectionLines);
+                $backstory = implode(' ', $segments);
+                $person->setBackstory($backstory);
+                $this->addChronicleEntry('biography', $backstory, $participants);
+        }
+
+        private function extractRecentChronicleLine () : string
+        {
+                $entries = array_reverse($this->metadataGetChronicle());
+                foreach ($entries as $entry)
+                {
+                        if (!is_array($entry)) continue;
+                        $type = strval($entry['type'] ?? '');
+                        if ($type === 'biography') continue;
+                        $text = trim(strval($entry['text'] ?? ''));
+                        if ($text !== '')
+                        {
+                                return $text;
+                        }
+                }
+                return '';
+        }
+
+        private function selectCommunityConnections (Person $person) : array
+        {
+                $candidates = array();
+                foreach ($this->people as $resident)
+                {
+                        if (!($resident instanceof Person)) continue;
+                        if ($resident === $person) continue;
+                        if (!$resident->isAlive()) continue;
+                        $candidates[] = $resident;
+                }
+                if (empty($candidates)) return array();
+                shuffle($candidates);
+                $max = min(3, count($candidates));
+                $rolePool = array('mentor', 'friend', 'partner', 'rival', 'inspiration');
+                shuffle($rolePool);
+                $connections = array();
+                for ($i = 0; $i < $max; $i++)
+                {
+                        $role = $rolePool[$i % count($rolePool)];
+                        $connections[] = array('role' => $role, 'person' => $candidates[$i]);
+                }
+                return $connections;
+        }
+
+        private function composeConnectionLine (Person $person, Person $other, string $role) : string
+        {
+                $templates = array(
+                        'mentor' => '%s apprenticed under %s to master local crafts.',
+                        'friend' => '%s shares dawn gatherings with longtime friend %s.',
+                        'partner' => '%s charts communal projects alongside %s.',
+                        'rival' => '%s tests ambitions against rival %s during seasonal contests.',
+                        'inspiration' => '%s draws inspiration from the stories of %s.'
+                );
+                $template = $templates[$role] ?? '%s maintains close ties with %s.';
+                return sprintf($template, $person->getName(), $other->getName());
+        }
+
+        private function addChronicleEntry (string $type, string $text, array $participants = array()) : void
+        {
+                $cleanType = Utility::cleanse_string($type);
+                $normalizedText = trim(strval($text));
+                if ($normalizedText === '') return;
+                $participantList = array_values(array_unique(array_filter(array_map('strval', $participants))));
+                $timestamp = microtime(true);
+                $this->recordChronicleEntry(
+                        ($cleanType === '') ? 'event' : $cleanType,
+                        $normalizedText,
+                        $timestamp,
+                        $participantList
+                );
+                foreach ($participantList as $participant)
+                {
+                        $person = $this->findPersonByName($participant);
+                        if ($person instanceof Person)
+                        {
+                                $person->addChronicleEntry(($cleanType === '') ? 'event' : $cleanType, $normalizedText, $timestamp, $participantList);
+                        }
+                }
+        }
+
+        private function findPersonByName (string $name) : ?Person
+        {
+                $clean = Utility::cleanse_string($name);
+                if ($clean === '') return null;
+                foreach ($this->people as $person)
+                {
+                        if (!($person instanceof Person)) continue;
+                        if (Utility::cleanse_string($person->getName()) === $clean)
+                        {
+                                return $person;
+                        }
+                }
+                return null;
         }
 
         private function rebalanceEmployment () : void
@@ -428,7 +947,7 @@ class Country
                         if ($this->isReadyForPopulation())
                         {
                                 $this->populationSeedTimer += $deltaTime;
-                                if ($this->populationSeedTimer >= 86400.0)
+                                if ($this->populationSeedTimer >= $this->getLocalDayLengthSeconds())
                                 {
                                         $this->populationSeedTimer = 0.0;
                                         $seed = intval(max(1, min(
@@ -451,7 +970,8 @@ class Country
                 }
 
                 $this->populationSeedTimer = 0.0;
-                $days = $deltaTime / 86400.0;
+                $dayLength = $this->getLocalDayLengthSeconds();
+                $days = ($dayLength > 0.0) ? ($deltaTime / $dayLength) : 0.0;
                 if ($days <= 0) return;
 
                 $capacityRemaining = max(0, $this->populationCapacity - $population);
@@ -591,6 +1111,14 @@ class Country
                         LOG_INFO,
                         L_CONSOLE
                 );
+                $summary = sprintf(
+                        '%s weathered %s (intensity %.2f) with %d casualties.',
+                        $this->name,
+                        $cause,
+                        $effectiveIntensity,
+                        $casualties
+                );
+                $this->addChronicleEntry('disaster', $summary);
                 return array(
                         'casualties' => $casualties,
                         'infrastructure_loss' => $infrastructureLoss,
@@ -624,7 +1152,9 @@ class Country
                         $this->adaptationLevel = $this->sanitizeFraction($this->adaptationLevel + $gain);
                         return;
                 }
-                $decay = ($deltaTime / 604800.0) * 0.01;
+                $week = $this->getLocalWeekLengthSeconds();
+                if ($week <= 0) return;
+                $decay = ($deltaTime / $week) * 0.01;
                 if ($decay > 0)
                 {
                         $this->adaptationLevel = max(0.0, $this->adaptationLevel - $decay);

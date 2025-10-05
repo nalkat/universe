@@ -148,7 +148,8 @@ class Job
         {
                 if ($deltaTime <= 0) return;
                 if (empty($this->resourceOutput)) return;
-                $timeFactor = $deltaTime / 86400.0;
+                $dayLength = $country->getLocalDayLengthSeconds();
+                $timeFactor = ($dayLength > 0.0) ? ($deltaTime / $dayLength) : 0.0;
                 foreach ($this->workers as $worker)
                 {
                         if (!($worker instanceof Person)) continue;

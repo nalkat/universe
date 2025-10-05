@@ -5,6 +5,8 @@ class City extends Settlement
         protected $services;
         protected $housing;
         protected $infrastructure;
+        protected $residents;
+        protected $radius;
 
         public function __construct(string $name, array $properties = array())
         {
@@ -22,6 +24,8 @@ class City extends Settlement
                         'utilities' => 0.5,
                         'sanitation' => 0.5,
                 );
+                $this->residents = array();
+                $this->radius = floatval($properties['radius'] ?? mt_rand(20, 140) / 10.0);
 
                 if (!empty($properties['districts']) && is_array($properties['districts']))
                 {
@@ -30,6 +34,39 @@ class City extends Settlement
                                 $this->districts[$district] = $profile;
                         }
                 }
+
+                if (empty($this->location) || !is_array($this->location))
+                {
+                        $this->location = array(
+                                'latitude' => mt_rand(-8500, 8500) / 100.0,
+                                'longitude' => mt_rand(-18000, 18000) / 100.0
+                        );
+                }
+
+                $this->recordEvent('foundation', 'City established as a civic nexus.', 0.2);
+        }
+
+        public function getRadius() : float
+        {
+                return max(1.0, $this->radius);
+        }
+
+        public function setRadius(float $radius) : void
+        {
+                $this->radius = max(1.0, $radius);
+        }
+
+        public function getCoordinates() : array
+        {
+                if (!is_array($this->location))
+                {
+                        return array('latitude' => 0.0, 'longitude' => 0.0);
+                }
+
+                return array(
+                        'latitude' => floatval($this->location['latitude'] ?? ($this->location['lat'] ?? 0.0)),
+                        'longitude' => floatval($this->location['longitude'] ?? ($this->location['lon'] ?? 0.0))
+                );
         }
 
         public function addDistrict(string $name, array $profile = array()) : void
@@ -74,11 +111,57 @@ class City extends Settlement
                                 if ($house->addResident($life))
                                 {
                                         $this->adjustPopulation(1);
+                                        $this->residents[] = $life;
+                                        $this->recordEvent('arrival', $life->getName() . ' settled in ' . $this->name . '.', 0.05);
                                         return true;
                                 }
                         }
                 }
                 return false;
+        }
+
+        public function addResident(Life $life) : void
+        {
+                $this->residents[] = $life;
+                $this->adjustPopulation(1);
+                $this->recordEvent('arrival', $life->getName() . ' made their home in ' . $this->name . '.', 0.05);
+        }
+
+        public function removeResident(Life $life) : void
+        {
+                foreach ($this->residents as $index => $resident)
+                {
+                        if ($resident === $life)
+                        {
+                                unset($this->residents[$index]);
+                                $this->residents = array_values($this->residents);
+                                $this->adjustPopulation(-1);
+                                $this->recordEvent('departure', $life->getName() . ' departed ' . $this->name . '.', -0.02);
+                                break;
+                        }
+                }
+        }
+
+        public function getResidents() : array
+        {
+                return $this->residents;
+        }
+
+        public function getChronicle(int $limit = 16) : array
+        {
+                $events = $this->getEventLog($limit);
+                $chronicle = array();
+                foreach ($events as $event)
+                {
+                        if (!is_array($event)) continue;
+                        $chronicle[] = array(
+                                'type' => $event['type'] ?? 'event',
+                                'text' => $event['description'] ?? '',
+                                'timestamp' => $event['timestamp'] ?? microtime(true),
+                                'impact' => $event['impact'] ?? 0.0
+                        );
+                }
+                return $chronicle;
         }
 
         public function tick(float $deltaTime = 1.0) : void

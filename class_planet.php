@@ -8,6 +8,17 @@ class Planet extends SystemObject
         private $environment;
         private $countries;
         private $habitabilityScore;
+        private $habitabilityFactors;
+        private $habitabilityClass;
+        private $weatherSystems;
+        private $weatherHistory;
+        private $currentWeatherIndex;
+        private $weatherTimer;
+        private $climateProfile;
+        private $timekeeping;
+        private $lastLocalTickDuration;
+        private $lastUniversalTickDuration;
+        private $biosphere;
 
         public function __construct (string $name, float $mass = 0.0, float $radius = 0.0, ?array $position = null, ?array $velocity = null)
         {
@@ -21,10 +32,30 @@ class Planet extends SystemObject
                         'water' => 0.0,
                         'atmosphere' => 0.0,
                         'magnetosphere' => 0.0,
-                        'biosignatures' => 0.0
+                        'biosignatures' => 0.0,
+                        'gravity' => 0.0,
+                        'pressure' => 0.0,
+                        'radiation' => 0.0,
+                        'resources' => 0.0,
+                        'geology' => 0.0,
+                        'stellar_flux' => 1.0,
+                        'climate_variance' => 0.0
                 );
                 $this->countries = array();
                 $this->habitabilityScore = 0.0;
+                $this->habitabilityFactors = array();
+                $this->habitabilityClass = 'barren';
+                $this->weatherSystems = array();
+                $this->weatherHistory = array();
+                $this->currentWeatherIndex = null;
+                $this->weatherTimer = 0.0;
+                $this->climateProfile = null;
+                $this->timekeeping = $this->generateTimekeepingProfile();
+                $this->lastLocalTickDuration = 0.0;
+                $this->lastUniversalTickDuration = 0.0;
+                $this->biosphere = array();
+                $this->setDescription('A newly catalogued world awaiting survey data.');
+                $this->regenerateBiosphere(true);
         }
 
         public function setAtmosphere (array $composition) : void
@@ -53,14 +84,30 @@ class Planet extends SystemObject
                 {
                         if (!array_key_exists($key, $environment)) continue;
                         $incoming = $environment[$key];
-                        if (in_array($key, array('temperature'), true))
+                        if ($key === 'temperature')
                         {
                                 $this->environment[$key] = floatval($incoming);
                                 continue;
                         }
-                        $this->environment[$key] = $this->normalizeFraction($incoming);
+                        if ($key === 'stellar_flux')
+                        {
+                                $this->environment[$key] = max(0.0, floatval($incoming));
+                                continue;
+                        }
+                        if ($key === 'gravity' || $key === 'pressure')
+                        {
+                                $this->environment[$key] = max(0.0, floatval($incoming));
+                                continue;
+                        }
+                        if ($key === 'climate_variance')
+                        {
+                                $this->environment[$key] = self::normalizeFraction($incoming);
+                                continue;
+                        }
+                        $this->environment[$key] = self::normalizeFraction($incoming);
                 }
                 $this->updateHabitabilityScore();
+                $this->refreshEnvironmentalNarrative(true);
         }
 
         public function getEnvironment () : array
@@ -73,9 +120,234 @@ class Planet extends SystemObject
                 return $this->habitabilityScore;
         }
 
+        public function getHabitabilityFactors () : array
+        {
+                return $this->habitabilityFactors;
+        }
+
+        public function getHabitabilityClassification () : string
+        {
+                return $this->habitabilityClass;
+        }
+
         public function isReadyForCivilization () : bool
         {
                 return ($this->habitable && ($this->habitabilityScore >= 0.6));
+        }
+
+        public function getEnvironmentSnapshot () : array
+        {
+                return $this->environment;
+        }
+
+        public function setTimekeeping (array $profile) : void
+        {
+                $this->applyTimekeepingProfile($profile);
+                $this->refreshTemporalDependents();
+        }
+
+        public function getTimekeepingProfile () : array
+        {
+                $dayLocal = $this->getDayLengthSeconds(true);
+                $dayUniversal = $this->getDayLengthSeconds(false);
+                $hourLocal = $this->getHourLengthSeconds(true);
+                $hourUniversal = $this->getHourLengthSeconds(false);
+                $yearLocal = $this->getYearLengthSeconds(true);
+                $yearUniversal = $this->getYearLengthSeconds(false);
+                $hoursPerDay = max(1.0, floatval($this->timekeeping['hours_per_day'] ?? 24.0));
+                $dayCount = ($dayLocal > 0.0) ? ($yearLocal / $dayLocal) : 0.0;
+
+                return array(
+                        'relative_rate' => $this->getRelativeTimeRate(),
+                        'hours_per_day' => $hoursPerDay,
+                        'day_length_local_seconds' => $dayLocal,
+                        'day_length_seconds' => $dayUniversal,
+                        'hour_length_local_seconds' => $hourLocal,
+                        'hour_length_seconds' => $hourUniversal,
+                        'year_length_local_seconds' => $yearLocal,
+                        'year_length_seconds' => $yearUniversal,
+                        'year_length_days' => $dayCount,
+                        'last_tick' => $this->getLastTickDurations(),
+                        'summary' => $this->describeTimekeeping()
+                );
+        }
+
+        public function getRelativeTimeRate () : float
+        {
+                return max(0.05, floatval($this->timekeeping['relative_rate'] ?? 1.0));
+        }
+
+        public function getDayLengthSeconds (bool $local = false) : float
+        {
+                $dayLocal = floatval($this->timekeeping['day_length_local'] ?? 86400.0);
+                if ($local) return $dayLocal;
+                $rate = $this->getRelativeTimeRate();
+                return ($rate > 0.0) ? ($dayLocal / $rate) : $dayLocal;
+        }
+
+        public function getHourLengthSeconds (bool $local = false) : float
+        {
+                $hoursPerDay = max(1.0, floatval($this->timekeeping['hours_per_day'] ?? 24.0));
+                $daySeconds = $this->getDayLengthSeconds($local);
+                return $daySeconds / $hoursPerDay;
+        }
+
+        public function getYearLengthSeconds (bool $local = false) : float
+        {
+                $yearLocal = floatval($this->timekeeping['year_length_local'] ?? 31557600.0);
+                if ($local) return $yearLocal;
+                $rate = $this->getRelativeTimeRate();
+                return ($rate > 0.0) ? ($yearLocal / $rate) : $yearLocal;
+        }
+
+        public function convertUniversalToLocalSeconds (float $seconds) : float
+        {
+                if ($seconds <= 0.0) return 0.0;
+                return $seconds * $this->getRelativeTimeRate();
+        }
+
+        public function convertLocalToUniversalSeconds (float $seconds) : float
+        {
+                if ($seconds <= 0.0) return 0.0;
+                $rate = $this->getRelativeTimeRate();
+                return ($rate > 0.0) ? ($seconds / $rate) : $seconds;
+        }
+
+        public function getLastTickDurations () : array
+        {
+                return array(
+                        'universal_seconds' => $this->lastUniversalTickDuration,
+                        'local_seconds' => $this->lastLocalTickDuration
+                );
+        }
+
+        private function convertSecondsToLocalHours (float $seconds) : float
+        {
+                $hour = max(1.0, $this->getHourLengthSeconds(true));
+                return max(0.0, $seconds / $hour);
+        }
+
+        public function describeTimekeeping () : string
+        {
+                $dayUniversalHours = $this->getDayLengthSeconds(false) / 3600.0;
+                $hoursPerDay = max(1.0, floatval($this->timekeeping['hours_per_day'] ?? 24.0));
+                $yearDays = ($this->getDayLengthSeconds(true) > 0.0)
+                        ? ($this->getYearLengthSeconds(true) / $this->getDayLengthSeconds(true))
+                        : 0.0;
+                $universalYearDays = $this->getYearLengthSeconds(false) / 86400.0;
+                $rate = $this->getRelativeTimeRate();
+
+                $phrases = array();
+                $phrases[] = sprintf(
+                        'Local days last %s universal hours across %s local hours.',
+                        number_format($dayUniversalHours, 1),
+                        number_format($hoursPerDay, 1)
+                );
+                $phrases[] = sprintf(
+                        'A local year spans %s local days (~%s universal days).',
+                        number_format($yearDays, 1),
+                        number_format($universalYearDays, 1)
+                );
+                if (abs($rate - 1.0) < 0.01)
+                {
+                        $phrases[] = 'Time here flows at the simulator\'s standard rate.';
+                }
+                elseif ($rate > 1.0)
+                {
+                        $phrases[] = sprintf('Time here runs %sx faster than the universal frame.', number_format($rate, 2));
+                }
+                else
+                {
+                        $phrases[] = sprintf('Time here runs %sx slower than the universal frame.', number_format(1.0 / max(0.01, $rate), 2));
+                }
+                return implode(' ', $phrases);
+        }
+
+        private function generateTimekeepingProfile () : array
+        {
+                $hoursPerDay = max(12.0, min(40.0, (random_int(120, 360) / 10.0)));
+                $dayLengthLocal = $hoursPerDay * 3600.0;
+                $yearDays = max(60.0, min(900.0, random_int(120, 720)));
+                $yearLengthLocal = $dayLengthLocal * $yearDays;
+                $relativeRate = max(0.4, min(2.5, random_int(40, 200) / 100.0));
+
+                return $this->ensureTimekeepingConsistency(array(
+                        'relative_rate' => $relativeRate,
+                        'hours_per_day' => $hoursPerDay,
+                        'day_length_local' => $dayLengthLocal,
+                        'year_length_local' => $yearLengthLocal
+                ));
+        }
+
+        private function applyTimekeepingProfile (array $profile) : void
+        {
+                $current = $this->timekeeping ?? $this->generateTimekeepingProfile();
+                if (isset($profile['relative_rate']))
+                {
+                        $current['relative_rate'] = max(0.05, min(5.0, floatval($profile['relative_rate'])));
+                }
+                if (isset($profile['hours_per_day']))
+                {
+                        $current['hours_per_day'] = max(4.0, min(48.0, floatval($profile['hours_per_day'])));
+                }
+                if (isset($profile['day_length_local_seconds']) || isset($profile['day_length_local']))
+                {
+                        $value = $profile['day_length_local_seconds'] ?? $profile['day_length_local'];
+                        $current['day_length_local'] = max(3600.0, floatval($value));
+                }
+                elseif (isset($profile['day_length_seconds']))
+                {
+                        $seconds = max(3600.0, floatval($profile['day_length_seconds']));
+                        $rate = max(0.05, floatval($current['relative_rate'] ?? 1.0));
+                        $current['day_length_local'] = $seconds * $rate;
+                }
+                if (isset($profile['year_length_local_seconds']) || isset($profile['year_length_local']))
+                {
+                        $value = $profile['year_length_local_seconds'] ?? $profile['year_length_local'];
+                        $current['year_length_local'] = max(
+                                max(3600.0, $current['day_length_local'] ?? 86400.0) * 16.0,
+                                floatval($value)
+                        );
+                }
+                elseif (isset($profile['year_length_seconds']))
+                {
+                        $seconds = max(3600.0, floatval($profile['year_length_seconds']));
+                        $rate = max(0.05, floatval($current['relative_rate'] ?? 1.0));
+                        $current['year_length_local'] = max(
+                                max(3600.0, $current['day_length_local'] ?? 86400.0) * 16.0,
+                                $seconds * $rate
+                        );
+                }
+                $this->timekeeping = $this->ensureTimekeepingConsistency($current);
+        }
+
+        private function ensureTimekeepingConsistency (array $profile) : array
+        {
+                $profile['relative_rate'] = max(0.05, min(5.0, floatval($profile['relative_rate'] ?? 1.0)));
+                $dayLocal = max(3600.0, floatval($profile['day_length_local'] ?? 86400.0));
+                $hoursPerDay = max(4.0, min(48.0, floatval($profile['hours_per_day'] ?? 24.0)));
+                $yearLocal = max($dayLocal * 16.0, floatval($profile['year_length_local'] ?? ($dayLocal * 365.0)));
+                return array(
+                        'relative_rate' => $profile['relative_rate'],
+                        'hours_per_day' => $hoursPerDay,
+                        'day_length_local' => $dayLocal,
+                        'year_length_local' => $yearLocal
+                );
+        }
+
+        private function refreshTemporalDependents () : void
+        {
+                if (!empty($this->weatherSystems))
+                {
+                        $this->initializeWeatherSystems(true);
+                }
+                foreach ($this->countries as $country)
+                {
+                        if ($country instanceof Country)
+                        {
+                                $country->synchronizeWithPlanetTimekeeping();
+                        }
+                }
         }
 
         public function registerCountry (Country $country) : void
@@ -117,6 +389,45 @@ class Planet extends SystemObject
                 return $this->countries[$cleanName];
         }
 
+        public function getWeatherSystems () : array
+        {
+                return $this->weatherSystems;
+        }
+
+        public function getCurrentWeather () : ?array
+        {
+                if ($this->currentWeatherIndex === null) return null;
+                if (!isset($this->weatherSystems[$this->currentWeatherIndex])) return null;
+                $current = $this->weatherSystems[$this->currentWeatherIndex];
+                $duration = floatval($current['duration'] ?? 0.0);
+                $elapsed = floatval($current['elapsed'] ?? 0.0);
+                $progress = ($duration > 0.0) ? max(0.0, min(1.0, $elapsed / $duration)) : 0.0;
+                return array(
+                        'name' => strval($current['name'] ?? 'weather system'),
+                        'type' => strval($current['type'] ?? 'unknown'),
+                        'intensity' => floatval($current['intensity'] ?? 0.0),
+                        'duration_hours' => ($duration > 0.0) ? $this->convertSecondsToLocalHours($duration) : 0.0,
+                        'progress' => $progress,
+                        'narrative' => strval($current['summary'] ?? '')
+                );
+        }
+
+        public function getWeatherHistory (int $limit = 10) : array
+        {
+                if ($limit <= 0) return array();
+                $history = array_reverse($this->weatherHistory);
+                return array_slice($history, 0, $limit);
+        }
+
+        public function describeClimate () : array
+        {
+                if ($this->climateProfile === null)
+                {
+                        $this->climateProfile = $this->deriveClimateProfile();
+                }
+                return $this->climateProfile;
+        }
+
         public function getPopulationSummary () : array
         {
                 $population = 0;
@@ -127,8 +438,312 @@ class Planet extends SystemObject
                 return array(
                         'population' => $population,
                         'countries' => count($this->countries),
-                        'habitability' => $this->habitabilityScore
+                        'habitability' => $this->habitabilityScore,
+                        'classification' => $this->habitabilityClass,
+                        'factors' => $this->habitabilityFactors,
+                        'timekeeping' => $this->getTimekeepingProfile(),
+                        'longevity' => $this->summarizePopulationLongevity(),
+                        'net_worth' => $this->getNetWorth(),
+                        'biosphere' => $this->getBiosphereComposition()
                 );
+        }
+
+        public function getNetWorth () : float
+        {
+                $total = 0.0;
+                foreach ($this->countries as $country)
+                {
+                        if (!($country instanceof Country)) continue;
+                        $total += $country->getNetWorth();
+                }
+                return max(0.0, $total);
+        }
+
+        public function getBiosphereComposition () : array
+        {
+                if (empty($this->biosphere))
+                {
+                        return array('kingdoms' => array(), 'phyla' => array(), 'entries' => array());
+                }
+                $kingdoms = array();
+                $phyla = array();
+                $entries = array();
+                foreach ($this->biosphere as $entry)
+                {
+                        if (!is_array($entry)) continue;
+                        $kingdom = strval($entry['kingdom'] ?? 'Unknown');
+                        $phylum = strval($entry['phylum'] ?? 'Unclassified');
+                        $share = floatval($entry['share'] ?? 0.0);
+                        if ($share <= 0.0) continue;
+                        if (!array_key_exists($kingdom, $kingdoms))
+                        {
+                                $kingdoms[$kingdom] = 0.0;
+                        }
+                        $kingdoms[$kingdom] += $share;
+                        if (!array_key_exists($phylum, $phyla))
+                        {
+                                $phyla[$phylum] = 0.0;
+                        }
+                        $phyla[$phylum] += $share;
+                        $entries[] = array(
+                                'kingdom' => $kingdom,
+                                'phylum' => $phylum,
+                                'share' => round($share * 100.0, 2)
+                        );
+                }
+                return array(
+                        'kingdoms' => $this->normalizeShareMap($kingdoms),
+                        'phyla' => $this->normalizeShareMap($phyla),
+                        'entries' => $entries
+                );
+        }
+
+        public function getMapOverview (int $peopleLimit = 0) : array
+        {
+                $countries = array();
+                $cities = array();
+                $residents = array();
+                foreach ($this->countries as $country)
+                {
+                        if (!($country instanceof Country)) continue;
+                        $territory = $country->getTerritoryProfile();
+                        $countryEntry = array(
+                                'name' => $country->getName(),
+                                'center' => $territory['center'] ?? null,
+                                'span' => $territory['span'] ?? null,
+                                'terrain' => $territory['terrain'] ?? null,
+                                'biome' => $territory['biome'] ?? null,
+                                'population' => $country->getPopulation(),
+                                'net_worth' => $country->getNetWorth(),
+                                'wealth_per_capita' => $country->getWealthPerCapita()
+                        );
+                        $countries[] = $countryEntry;
+                        foreach ($country->getCities() as $city)
+                        {
+                                if (!($city instanceof City)) continue;
+                                $coords = $city->getCoordinates();
+                                $cityEntry = array(
+                                        'name' => $city->getName(),
+                                        'country' => $country->getName(),
+                                        'coordinates' => $coords,
+                                        'radius' => $city->getRadius(),
+                                        'population' => $city->getPopulation()
+                                );
+                                $cities[] = $cityEntry;
+                                $residentsList = $city->getResidents();
+                                if (!is_array($residentsList) || empty($residentsList))
+                                {
+                                        continue;
+                                }
+                                $limit = ($peopleLimit > 0) ? min($peopleLimit, count($residentsList)) : count($residentsList);
+                                for ($i = 0; $i < $limit; $i++)
+                                {
+                                        $person = $residentsList[$i];
+                                        if (!($person instanceof Person)) continue;
+                                        $location = $person->getCoordinates() ?? $coords;
+                                        $residents[] = array(
+                                                'name' => $person->getName(),
+                                                'city' => $city->getName(),
+                                                'country' => $country->getName(),
+                                                'coordinates' => $location,
+                                                'net_worth' => $person->getNetWorth()
+                                        );
+                                }
+                        }
+                }
+                return array(
+                        'projection' => 'equirectangular',
+                        'width' => 360,
+                        'height' => 180,
+                        'countries' => $countries,
+                        'cities' => $cities,
+                        'residents' => $residents
+                );
+        }
+
+        private function regenerateBiosphere (bool $force) : void
+        {
+                $biosignatures = self::normalizeFraction($this->environment['biosignatures'] ?? 0.0);
+                if ($biosignatures <= 0.05)
+                {
+                        if ($force || !empty($this->biosphere))
+                        {
+                                $this->biosphere = array();
+                        }
+                        return;
+                }
+                if (!$force && !empty($this->biosphere))
+                {
+                        return;
+                }
+
+                $water = self::normalizeFraction($this->environment['water'] ?? 0.0);
+                $atmosphere = self::normalizeFraction($this->environment['atmosphere'] ?? 0.0);
+                $temperature = floatval($this->environment['temperature'] ?? 0.0);
+                $habitability = max(0.0, min(1.0, $this->habitabilityScore));
+
+                $weights = array(
+                        'Animalia' => 0.2 + ($habitability * 0.5) + ($water * 0.2),
+                        'Plantae' => 0.25 + ($water * 0.5),
+                        'Fungi' => 0.12 + ($atmosphere * 0.2),
+                        'Protista' => 0.1 + ($water * 0.3),
+                        'Bacteria' => 0.15 + (($temperature > 40.0) ? 0.15 : 0.07),
+                        'Archaea' => 0.08 + (($temperature > 80.0) ? 0.25 : 0.05)
+                );
+                $totalWeight = array_sum($weights);
+                if ($totalWeight <= 0.0)
+                {
+                        $this->biosphere = array();
+                        return;
+                }
+                foreach ($weights as $key => $value)
+                {
+                        $weights[$key] = max(0.0, $value / $totalWeight);
+                }
+
+                $phyla = array(
+                        'Animalia' => array('Chordata', 'Arthropoda', 'Mollusca', 'Echinodermata', 'Cnidaria'),
+                        'Plantae' => array('Bryophyta', 'Magnoliophyta', 'Coniferophyta', 'Pteridophyta', 'Chlorophyta'),
+                        'Fungi' => array('Basidiomycota', 'Ascomycota', 'Glomeromycota', 'Zygomycota'),
+                        'Protista' => array('Diatomophyta', 'Dinoflagellata', 'Radiolaria', 'Euglenozoa'),
+                        'Bacteria' => array('Cyanobacteria', 'Proteobacteria', 'Firmicutes', 'Actinobacteria'),
+                        'Archaea' => array('Halobacteria', 'Thermoprotei', 'Methanobacteria', 'Thaumarchaeota')
+                );
+
+                $groups = max(3, min(18, intval(round($biosignatures * 10)) + mt_rand(1, 4)));
+                $remaining = 1.0;
+                $entries = array();
+                for ($i = 0; $i < $groups; $i++)
+                {
+                        if ($i === $groups - 1)
+                        {
+                                $share = max(0.01, $remaining);
+                        }
+                        else
+                        {
+                                $maxShare = max(0.05, $remaining - max(0.05, ($groups - $i - 1) * 0.03));
+                                $share = max(0.01, min($maxShare, ($biosignatures * mt_rand(5, 20)) / 100.0));
+                        }
+                        $remaining = max(0.0, $remaining - $share);
+                        $kingdom = $this->weightedChoice($weights);
+                        $options = $phyla[$kingdom] ?? array('Unclassified');
+                        $phylum = $options[mt_rand(0, count($options) - 1)];
+                        $entries[] = array(
+                                'kingdom' => $kingdom,
+                                'phylum' => $phylum,
+                                'share' => $share
+                        );
+                }
+                if ($remaining > 0.0 && !empty($entries))
+                {
+                        $entries[0]['share'] += $remaining;
+                }
+                $this->biosphere = $entries;
+        }
+
+        private function weightedChoice (array $weights) : string
+        {
+                $roll = mt_rand(0, 1000) / 1000.0;
+                $cumulative = 0.0;
+                foreach ($weights as $key => $weight)
+                {
+                        $cumulative += max(0.0, $weight);
+                        if ($roll <= $cumulative)
+                        {
+                                return $key;
+                        }
+                }
+                $keys = array_keys($weights);
+                return strval(reset($keys));
+        }
+
+        private function normalizeShareMap (array $map) : array
+        {
+                if (empty($map))
+                {
+                        return array();
+                }
+                $total = array_sum($map);
+                if ($total <= 0.0)
+                {
+                        return array();
+                }
+                $normalized = array();
+                foreach ($map as $key => $value)
+                {
+                        $normalized[$key] = round(($value / $total) * 100.0, 2);
+                }
+                arsort($normalized);
+                return $normalized;
+        }
+
+        private function summarizePopulationLongevity () : array
+        {
+                $expectancies = array();
+                $senescence = array();
+                foreach ($this->countries as $country)
+                {
+                        if (!($country instanceof Country)) continue;
+                        foreach ($country->getPeople() as $person)
+                        {
+                                if (!($person instanceof Person)) continue;
+                                $expectancies[] = $person->getLifeExpectancyYears();
+                                $senescence[] = $person->getSenescenceStartYears();
+                        }
+                }
+                $yearLocal = $this->getYearLengthSeconds(true);
+                $yearDays = ($this->getDayLengthSeconds(true) > 0.0)
+                        ? ($yearLocal / $this->getDayLengthSeconds(true))
+                        : 0.0;
+                if (!empty($expectancies))
+                {
+                        $average = array_sum($expectancies) / count($expectancies);
+                        sort($expectancies);
+                        $min = reset($expectancies);
+                        $max = end($expectancies);
+                        $senescenceAverage = (!empty($senescence)) ? array_sum($senescence) / count($senescence) : null;
+                        return array(
+                                'basis' => 'observed',
+                                'life_expectancy_years' => $average,
+                                'life_expectancy_years_range' => array(
+                                        'min' => $min,
+                                        'max' => $max
+                                ),
+                                'senescence_start_years' => $senescenceAverage,
+                                'year_length_local_seconds' => $yearLocal,
+                                'year_length_seconds' => $this->getYearLengthSeconds(false),
+                                'year_length_days' => $yearDays
+                        );
+                }
+                list($expected, $senescenceStart) = $this->estimateBaseLongevity();
+                return array(
+                        'basis' => 'projection',
+                        'life_expectancy_years' => $expected,
+                        'senescence_start_years' => $senescenceStart,
+                        'year_length_local_seconds' => $yearLocal,
+                        'year_length_seconds' => $this->getYearLengthSeconds(false),
+                        'year_length_days' => $yearDays
+                );
+        }
+
+        private function estimateBaseLongevity () : array
+        {
+                $habitability = max(0.0, min(1.0, $this->habitabilityScore));
+                $profile = $this->describeClimate();
+                $variance = floatval($profile['variance'] ?? 0.0);
+                $rate = $this->getRelativeTimeRate();
+                $expected = 60.0 + ($habitability * 35.0) - ($variance * 12.0);
+                if ($rate < 1.0)
+                {
+                        $expected += (1.0 - $rate) * 6.0;
+                }
+                elseif ($rate > 1.0)
+                {
+                        $expected -= min(12.0, ($rate - 1.0) * 8.0);
+                }
+                $expected = max(30.0, min(120.0, $expected));
+                $senescence = max(20.0, min($expected - 4.0, $expected * (0.6 + $habitability * 0.2)));
+                return array($expected, $senescence);
         }
 
         public function getOrbit () : ?array
@@ -175,6 +790,10 @@ class Planet extends SystemObject
 
         public function tick (float $deltaTime = 1.0) : void
         {
+                $deltaTime = floatval($deltaTime);
+                $localDelta = $this->convertUniversalToLocalSeconds($deltaTime);
+                $this->lastUniversalTickDuration = max(0.0, $deltaTime);
+                $this->lastLocalTickDuration = max(0.0, $localDelta);
                 $useAnalyticOrbit = ($this->orbit !== null) && ($deltaTime > 0);
                 if ($useAnalyticOrbit)
                 {
@@ -193,6 +812,7 @@ class Planet extends SystemObject
                 {
                         parent::tick($deltaTime);
                 }
+                $this->advanceWeather($localDelta);
                 foreach ($this->countries as $country)
                 {
                         $country->tick($deltaTime);
@@ -211,11 +831,14 @@ class Planet extends SystemObject
                 }
                 $temperatureShock = min(150.0, $relativeSpeed * 0.01 * $intensity);
                 $this->environment['temperature'] += $temperatureShock;
-                foreach (array('water', 'atmosphere', 'magnetosphere', 'biosignatures') as $key)
+                foreach (array('water', 'atmosphere', 'magnetosphere', 'biosignatures', 'resources', 'geology', 'pressure') as $key)
                 {
                         $this->environment[$key] = max(0.0, $this->environment[$key] * (1.0 - $intensity * 0.4));
                 }
+                $this->environment['radiation'] = max(0.0, $this->environment['radiation'] * (1.0 - $intensity * 0.25));
+                $this->environment['gravity'] = max(0.0, min(1.0, $this->environment['gravity'] * (1.0 - $intensity * 0.1)));
                 $this->updateHabitabilityScore();
+                $this->refreshEnvironmentalNarrative(true);
                 foreach ($this->countries as $country)
                 {
                         if ($country instanceof Country)
@@ -230,32 +853,544 @@ class Planet extends SystemObject
                 );
         }
 
-        private function normalizeFraction ($value) : float
+        private static function normalizeFraction ($value) : float
         {
                 return max(0.0, min(1.0, floatval($value)));
         }
 
+        private static function gaussianScore (float $value, float $ideal, float $spread) : float
+        {
+                if ($spread <= 0)
+                {
+                        return ($value === $ideal) ? 1.0 : 0.0;
+                }
+                $delta = $value - $ideal;
+                $exponent = -($delta * $delta) / (2.0 * $spread * $spread);
+                return max(0.0, min(1.0, exp($exponent)));
+        }
+
         private function updateHabitabilityScore () : void
         {
-                $temperatureScore = 0.0;
-                $temperature = $this->environment['temperature'];
-                if ($temperature >= -50 && $temperature <= 70)
+                $analysis = self::analyzeHabitability($this->environment);
+                $this->habitabilityScore = $analysis['score'];
+                $this->habitable = $analysis['habitable'];
+                $this->habitabilityFactors = $analysis['factors'];
+                $this->habitabilityClass = $analysis['classification'];
+                $this->refreshEnvironmentalNarrative(false);
+        }
+
+        private function refreshEnvironmentalNarrative (bool $forceWeather) : void
+        {
+                $this->climateProfile = $this->deriveClimateProfile();
+                $this->initializeWeatherSystems($forceWeather);
+                $this->refreshDescription();
+                $this->regenerateBiosphere($forceWeather);
+        }
+
+        private function deriveClimateProfile () : array
+        {
+                $env = $this->environment;
+                $temperature = floatval($env['temperature'] ?? 0.0);
+                $water = self::normalizeFraction($env['water'] ?? 0.0);
+                $atmosphere = self::normalizeFraction($env['atmosphere'] ?? 0.0);
+                $variance = self::normalizeFraction($env['climate_variance'] ?? 0.0);
+                $gravity = max(0.0, floatval($env['gravity'] ?? 0.0));
+                $pressure = max(0.0, floatval($env['pressure'] ?? 0.0));
+                $biosignatures = self::normalizeFraction($env['biosignatures'] ?? 0.0);
+                $resources = self::normalizeFraction($env['resources'] ?? 0.0);
+
+                $climateAdjective = 'temperate';
+                if ($temperature <= -120)
                 {
-                        $temperatureScore = 1.0 - (abs($temperature - 15) / 85);
-                        $temperatureScore = max(0.0, min(1.0, $temperatureScore));
+                        $climateAdjective = 'cryogenic';
                 }
-                $scores = array(
-                        $temperatureScore,
-                        $this->environment['water'],
-                        $this->environment['atmosphere'],
-                        $this->environment['magnetosphere'],
-                        $this->environment['biosignatures']
+                elseif ($temperature <= -40)
+                {
+                        $climateAdjective = 'glacial';
+                }
+                elseif ($temperature <= 5)
+                {
+                        $climateAdjective = 'chilled';
+                }
+                elseif ($temperature <= 28)
+                {
+                        $climateAdjective = 'temperate';
+                }
+                elseif ($temperature <= 55)
+                {
+                        $climateAdjective = 'warm';
+                }
+                elseif ($temperature <= 95)
+                {
+                        $climateAdjective = 'simmering';
+                }
+                else
+                {
+                        $climateAdjective = 'searing';
+                }
+
+                $humidityClass = 'balanced';
+                if ($water >= 0.8)
+                {
+                        $humidityClass = 'oceanic';
+                }
+                elseif ($water >= 0.6)
+                {
+                        $humidityClass = 'humid';
+                }
+                elseif ($water >= 0.4)
+                {
+                        $humidityClass = 'balanced';
+                }
+                elseif ($water >= 0.2)
+                {
+                        $humidityClass = 'arid';
+                }
+                else
+                {
+                        $humidityClass = 'desert';
+                }
+
+                $biomeDescriptor = 'continental';
+                switch ($humidityClass)
+                {
+                        case 'oceanic':
+                                $biomeDescriptor = ($temperature <= 0) ? 'glacial oceanic' : 'oceanic';
+                                break;
+                        case 'humid':
+                                $biomeDescriptor = ($temperature >= 30) ? 'tropical' : 'lush continental';
+                                break;
+                        case 'arid':
+                                $biomeDescriptor = ($temperature >= 40) ? 'sun-baked plateau' : 'semi-arid steppe';
+                                break;
+                        case 'desert':
+                                $biomeDescriptor = ($temperature >= 25) ? 'desert' : 'cold desert';
+                                break;
+                        default:
+                                $biomeDescriptor = 'continental';
+                                break;
+                }
+                if ($temperature <= -60)
+                {
+                        $biomeDescriptor = 'glacial expanse';
+                }
+                elseif ($temperature >= 120)
+                {
+                        $biomeDescriptor = 'volcanic badlands';
+                }
+
+                $seasonalityPhrase = 'with steady seasons';
+                $seasonalityDescriptor = 'steady sky currents';
+                if ($variance > 0.75)
+                {
+                        $seasonalityPhrase = 'with wild seasonal upheavals';
+                        $seasonalityDescriptor = 'tempestuous air rivers';
+                }
+                elseif ($variance > 0.5)
+                {
+                        $seasonalityPhrase = 'with dramatic seasonal swings';
+                        $seasonalityDescriptor = 'roaring jet streams';
+                }
+                elseif ($variance > 0.25)
+                {
+                        $seasonalityPhrase = 'with gentle seasonal cycles';
+                        $seasonalityDescriptor = 'measured sky tides';
+                }
+
+                $lifePhrase = 'No confirmed native biospheres yet catalogued.';
+                if ($biosignatures >= 0.75)
+                {
+                        $lifePhrase = 'Biospheres flourish across the landscape.';
+                }
+                elseif ($biosignatures >= 0.4)
+                {
+                        $lifePhrase = 'Signs of developing ecosystems cluster around sheltered regions.';
+                }
+                elseif ($biosignatures >= 0.2)
+                {
+                        $lifePhrase = 'Hardy microbial colonies trace mineral veins beneath the surface.';
+                }
+
+                $resourcePhrase = 'Resource outlook: scarce, requiring extensive imports.';
+                if ($resources >= 0.75)
+                {
+                        $resourcePhrase = 'Resource outlook: abundant strategic metals and organics.';
+                }
+                elseif ($resources >= 0.45)
+                {
+                        $resourcePhrase = 'Resource outlook: balanced reserves for sustainable development.';
+                }
+                elseif ($resources >= 0.25)
+                {
+                        $resourcePhrase = 'Resource outlook: sparse deposits demanding careful stewardship.';
+                }
+
+                $skyPhrase = 'Skies remain open with occasional cloud towers.';
+                if ($atmosphere <= 0.2 || $pressure <= 0.4)
+                {
+                        $skyPhrase = 'Skies are thin and reveal stark starfields.';
+                }
+                elseif ($atmosphere >= 0.85 && $pressure >= 1.1)
+                {
+                        $skyPhrase = 'Dense skies diffuse light into brilliant dawns.';
+                }
+
+                $gravityPhrase = 'Gravity aligns closely with human norms.';
+                if ($gravity <= 0.7)
+                {
+                        $gravityPhrase = 'Gravity runs light, encouraging towering formations.';
+                }
+                elseif ($gravity >= 1.3)
+                {
+                        $gravityPhrase = 'Gravity bears heavily on the landscape.';
+                }
+
+                $communityHook = 'Communities balance agrarian plains with skyward observatories.';
+                switch ($humidityClass)
+                {
+                        case 'oceanic':
+                                $communityHook = 'Communities trace their history along tidal archipelagos.';
+                                break;
+                        case 'humid':
+                                $communityHook = 'Communities thrive beneath monsoon-fed canopies and terraces.';
+                                break;
+                        case 'arid':
+                                $communityHook = 'Communities migrate between oases and wind-carved ridges.';
+                                break;
+                        case 'desert':
+                                $communityHook = 'Communities shelter in cavernous sanctuaries beneath dune seas.';
+                                break;
+                }
+                if ($variance > 0.7)
+                {
+                        $communityHook .= ' Seasonal migrations synchronize with the volatile climate.';
+                }
+
+                $stellarFlux = max(0.0, min(1.0, floatval($env['stellar_flux'] ?? 0.0)));
+                $weatherEnergy = min(1.0, max(0.0, ($variance * 0.65) + ($stellarFlux * 0.2) + ($atmosphere * 0.15)));
+
+                return array(
+                        'climate_adjective' => $climateAdjective,
+                        'biome_descriptor' => $biomeDescriptor,
+                        'humidity_class' => $humidityClass,
+                        'seasonality_phrase' => $seasonalityPhrase,
+                        'seasonality_descriptor' => $seasonalityDescriptor,
+                        'life_phrase' => $lifePhrase,
+                        'resource_phrase' => $resourcePhrase,
+                        'sky_phrase' => $skyPhrase,
+                        'gravity_phrase' => $gravityPhrase,
+                        'community_hook' => $communityHook,
+                        'weather_energy' => $weatherEnergy,
+                        'variance' => $variance,
+                        'temperature' => $temperature,
+                        'water' => $water
                 );
-                $this->habitabilityScore = array_sum($scores) / count($scores);
-                if ($this->habitabilityScore >= 0.6)
+        }
+
+        private function initializeWeatherSystems (bool $force) : void
+        {
+                if (!$force && !empty($this->weatherSystems))
                 {
-                        $this->habitable = true;
+                        foreach ($this->weatherSystems as $index => $pattern)
+                        {
+                                $this->weatherSystems[$index]['intensity'] = $this->recalculateWeatherIntensity(floatval($pattern['intensity'] ?? 0.3));
+                                $this->weatherSystems[$index]['summary'] = $this->summarizeWeatherPattern($this->weatherSystems[$index]);
+                        }
+                        if ($this->currentWeatherIndex === null && !empty($this->weatherSystems))
+                        {
+                                $this->currentWeatherIndex = 0;
+                        }
+                        return;
                 }
+
+                $this->weatherSystems = array();
+                $profile = $this->describeClimate();
+                $volatility = max(0.0, min(1.0, floatval($this->environment['climate_variance'] ?? 0.0)));
+                $count = max(3, min(8, 3 + intval(round($volatility * 4))));
+                for ($i = 0; $i < $count; $i++)
+                {
+                        $this->weatherSystems[] = $this->createWeatherPattern($i, $profile);
+                }
+                if (empty($this->weatherSystems))
+                {
+                        $this->currentWeatherIndex = null;
+                        return;
+                }
+                $this->currentWeatherIndex = 0;
+                $this->weatherSystems[$this->currentWeatherIndex]['summary'] = $this->summarizeWeatherPattern($this->weatherSystems[$this->currentWeatherIndex]);
+                $this->weatherHistory = array();
+                $this->weatherTimer = 0.0;
+        }
+
+        private function createWeatherPattern (int $index, array $profile) : array
+        {
+                $archetypes = array(
+                        'oceanic' => array('tidal bloom', 'mariner squall', 'mistfall gyre', 'cyclonic surge'),
+                        'humid' => array('canopy deluge', 'jungle monsoon', 'fog tier procession', 'rainfront chorus'),
+                        'balanced' => array('continental rain band', 'jetstream sweep', 'temperate front', 'polar exchange'),
+                        'arid' => array('dusk gale', 'mirage storm', 'loess current', 'plateau gust'),
+                        'desert' => array('sirocco tide', 'dune cyclone', 'ember squall', 'sandglass surge')
+                );
+                $humidity = $profile['humidity_class'] ?? 'balanced';
+                if (!isset($archetypes[$humidity]))
+                {
+                        $humidity = 'balanced';
+                }
+                $options = $archetypes[$humidity];
+                $choice = $options[$index % count($options)];
+                $baseEnergy = floatval($profile['weather_energy'] ?? 0.4);
+                $intensity = $this->recalculateWeatherIntensity($baseEnergy + (((mt_rand() / mt_getrandmax()) - 0.5) * 0.2));
+                $durationHours = $this->generateWeatherDurationHours();
+                $pattern = array(
+                        'id' => sprintf('wx-%s-%d', substr(hash('crc32b', $this->getName() . $choice . microtime(true)), 0, 6), $index + 1),
+                        'name' => ucwords($choice),
+                        'type' => $humidity,
+                        'intensity' => $intensity,
+                        'duration' => $durationHours * $this->getHourLengthSeconds(true),
+                        'elapsed' => 0.0,
+                        'summary' => ''
+                );
+                $pattern['summary'] = $this->summarizeWeatherPattern($pattern);
+                return $pattern;
+        }
+
+        private function generateWeatherDurationHours () : int
+        {
+                $variance = max(0.0, min(1.0, floatval($this->environment['climate_variance'] ?? 0.0)));
+                $base = 10 + intval(round($variance * 40));
+                $min = max(6, $base - 6);
+                $max = max($min + 2, $base + 12);
+                return random_int($min, $max);
+        }
+
+        private function recalculateWeatherIntensity (float $baseline) : float
+        {
+                $energy = floatval($this->climateProfile['weather_energy'] ?? 0.4);
+                $noise = ((mt_rand() / mt_getrandmax()) - 0.5) * 0.25;
+                $result = ($baseline * 0.3) + ($energy * 0.6) + $noise + 0.1;
+                return max(0.05, min(1.0, $result));
+        }
+
+        private function describeIntensity (float $intensity) : string
+        {
+                if ($intensity < 0.2) return 'gentle';
+                if ($intensity < 0.4) return 'mild';
+                if ($intensity < 0.6) return 'brisk';
+                if ($intensity < 0.8) return 'intense';
+                return 'ferocious';
+        }
+
+        private function summarizeWeatherPattern (array $pattern) : string
+        {
+                $profile = $this->describeClimate();
+                $intensityLabel = $this->describeIntensity(floatval($pattern['intensity'] ?? 0.0));
+                $biome = strtolower(strval($profile['biome_descriptor'] ?? 'terrain'));
+                $seasonalityDescriptor = $profile['seasonality_descriptor'] ?? 'changing skies';
+                $name = strtolower(strval($pattern['name'] ?? 'weather system'));
+                $durationHours = max(1.0, $this->convertSecondsToLocalHours(floatval($pattern['duration'] ?? 0.0)));
+                $line = sprintf('%s %s channels %s over the %s for roughly %.1f hours.', ucfirst($intensityLabel), $name, $seasonalityDescriptor, $biome, $durationHours);
+                $life = trim(strval($profile['life_phrase'] ?? ''));
+                if ($life !== '')
+                {
+                        $line .= ' ' . $life;
+                }
+                return $line;
+        }
+
+        private function advanceWeather (float $deltaTime) : void
+        {
+                if ($deltaTime <= 0) return;
+                if (empty($this->weatherSystems))
+                {
+                        $this->initializeWeatherSystems(true);
+                }
+                if (empty($this->weatherSystems)) return;
+                if ($this->currentWeatherIndex === null)
+                {
+                        $this->currentWeatherIndex = 0;
+                }
+                if (!isset($this->weatherSystems[$this->currentWeatherIndex])) return;
+
+                $deltaTime = floatval($deltaTime);
+                $this->weatherTimer += $deltaTime;
+                $current = $this->weatherSystems[$this->currentWeatherIndex];
+                $current['elapsed'] = floatval($current['elapsed'] ?? 0.0) + $deltaTime;
+                $duration = floatval($current['duration'] ?? 0.0);
+                if (($duration > 0.0) && ($current['elapsed'] >= $duration))
+                {
+                        $current['elapsed'] = $duration;
+                        $current['summary'] = $this->summarizeWeatherPattern($current);
+                        $this->weatherSystems[$this->currentWeatherIndex] = $current;
+                        $this->weatherHistory[] = $this->buildWeatherHistoryEntry($current);
+                        if (count($this->weatherHistory) > 24)
+                        {
+                                array_shift($this->weatherHistory);
+                        }
+                        $this->currentWeatherIndex = ($this->currentWeatherIndex + 1) % count($this->weatherSystems);
+                        $this->weatherTimer = 0.0;
+                        if (isset($this->weatherSystems[$this->currentWeatherIndex]))
+                        {
+                                $this->weatherSystems[$this->currentWeatherIndex]['elapsed'] = 0.0;
+                                $this->weatherSystems[$this->currentWeatherIndex]['summary'] = $this->summarizeWeatherPattern($this->weatherSystems[$this->currentWeatherIndex]);
+                        }
+                        $this->refreshDescription();
+                        return;
+                }
+
+                $this->weatherSystems[$this->currentWeatherIndex] = $current;
+                if ($this->weatherTimer >= $this->getHourLengthSeconds(true))
+                {
+                        $this->weatherSystems[$this->currentWeatherIndex]['summary'] = $this->summarizeWeatherPattern($current);
+                        $this->weatherTimer = 0.0;
+                        $this->refreshDescription();
+                }
+        }
+
+        private function buildWeatherHistoryEntry (array $pattern) : string
+        {
+                $name = strtolower(strval($pattern['name'] ?? 'weather system'));
+                $intensityLabel = $this->describeIntensity(floatval($pattern['intensity'] ?? 0.0));
+                $summary = trim(strval($pattern['summary'] ?? ''));
+                $entry = sprintf('%s %s completed its cycle.', ucfirst($intensityLabel), $name);
+                if ($summary !== '')
+                {
+                        $entry .= ' ' . $summary;
+                }
+                return $entry;
+        }
+
+        private function refreshDescription () : void
+        {
+                if ($this->climateProfile === null)
+                {
+                        $this->setDescription('Planetary climate data pending survey.');
+                        return;
+                }
+
+                $intro = sprintf(
+                        'A %s %s world %s.',
+                        $this->climateProfile['climate_adjective'],
+                        $this->climateProfile['biome_descriptor'],
+                        $this->climateProfile['seasonality_phrase']
+                );
+                $lifeLine = $this->climateProfile['life_phrase'];
+                $resourceLine = $this->climateProfile['resource_phrase'];
+                $skyLine = $this->climateProfile['sky_phrase'];
+                $gravityLine = $this->climateProfile['gravity_phrase'];
+                $habitabilityLine = sprintf(
+                        'Habitability score %.2f (%s).',
+                        $this->habitabilityScore,
+                        $this->habitabilityClass
+                );
+                $weather = $this->getCurrentWeather();
+                $weatherLine = ($weather === null) ? '' : $weather['narrative'];
+                $timeLine = $this->describeTimekeeping();
+                $segments = array($intro, $lifeLine, $resourceLine, $skyLine, $gravityLine, $habitabilityLine, $weatherLine, $timeLine);
+                $filtered = array();
+                foreach ($segments as $segment)
+                {
+                        $segment = trim(strval($segment));
+                        if ($segment === '') continue;
+                        $filtered[] = $segment;
+                }
+                $this->setDescription(implode(' ', $filtered));
+        }
+
+        public static function analyzeHabitability (array $environment) : array
+        {
+                $defaults = array(
+                        'temperature' => 0.0,
+                        'water' => 0.0,
+                        'atmosphere' => 0.0,
+                        'magnetosphere' => 0.0,
+                        'biosignatures' => 0.0,
+                        'gravity' => 0.0,
+                        'pressure' => 0.0,
+                        'radiation' => 0.0,
+                        'resources' => 0.0,
+                        'geology' => 0.0,
+                        'stellar_flux' => 1.0,
+                        'climate_variance' => 0.0
+                );
+                $env = array_merge($defaults, $environment);
+
+                $temperatureScore = self::gaussianScore($env['temperature'], 15.0, 45.0);
+                $fluxScore = self::gaussianScore($env['stellar_flux'], 1.0, 0.6);
+                $gravityScore = self::gaussianScore($env['gravity'], 1.0, 0.35);
+                $pressureScore = self::gaussianScore($env['pressure'], 1.0, 0.5);
+                $radiationScore = $env['radiation'];
+                $waterScore = $env['water'];
+                $atmosphereScore = $env['atmosphere'];
+                $magnetosphereScore = $env['magnetosphere'];
+                $biosignaturesScore = $env['biosignatures'];
+                $resourceScore = $env['resources'];
+                $geologyScore = $env['geology'];
+                $climateScore = 1.0 - self::normalizeFraction($env['climate_variance']);
+
+                $weights = array(
+                        'temperature' => 0.20,
+                        'water' => 0.12,
+                        'atmosphere' => 0.12,
+                        'magnetosphere' => 0.08,
+                        'biosignatures' => 0.10,
+                        'gravity' => 0.08,
+                        'pressure' => 0.06,
+                        'radiation' => 0.08,
+                        'resources' => 0.06,
+                        'geology' => 0.05,
+                        'stellar_flux' => 0.05,
+                        'climate' => 0.05
+                );
+
+                $factors = array(
+                        'temperature' => $temperatureScore,
+                        'water' => $waterScore,
+                        'atmosphere' => $atmosphereScore,
+                        'magnetosphere' => $magnetosphereScore,
+                        'biosignatures' => $biosignaturesScore,
+                        'gravity' => $gravityScore,
+                        'pressure' => $pressureScore,
+                        'radiation' => $radiationScore,
+                        'resources' => $resourceScore,
+                        'geology' => $geologyScore,
+                        'stellar_flux' => $fluxScore,
+                        'climate' => $climateScore
+                );
+
+                $score = 0.0;
+                foreach ($factors as $name => $value)
+                {
+                        $weight = $weights[$name] ?? 0.0;
+                        $score += $weight * max(0.0, min(1.0, $value));
+                }
+
+                $score = max(0.0, min(1.0, $score));
+                $habitable = ($score >= 0.62) && ($temperatureScore > 0.2) && ($waterScore > 0.2) && ($atmosphereScore > 0.2);
+
+                $classification = 'barren';
+                if ($score >= 0.85)
+                {
+                        $classification = 'lush';
+                }
+                elseif ($score >= 0.75)
+                {
+                        $classification = 'temperate';
+                }
+                elseif ($score >= 0.62)
+                {
+                        $classification = 'marginal';
+                }
+                elseif ($score >= 0.45)
+                {
+                        $classification = 'hostile';
+                }
+
+                return array(
+                        'score' => $score,
+                        'habitable' => $habitable,
+                        'classification' => $classification,
+                        'factors' => $factors
+                );
         }
 
         private function updateOrbit (float $deltaTime) : void

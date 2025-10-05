@@ -1,20 +1,17 @@
 <?php // 7.3.0
-// file locations
-$envLogRoot = $_SERVER['ENV_LOGROOT'] ?? getenv('ENV_LOGROOT') ?? (__DIR__ . '/../runtime/logs');
-$envRunRoot = $_SERVER['ENV_RUNROOT'] ?? getenv('ENV_RUNROOT') ?? (__DIR__ . '/../runtime/run');
-$envTmpRoot = $_SERVER['ENV_TMPROOT'] ?? getenv('ENV_TMPROOT') ?? (__DIR__ . '/../runtime/tmp');
-$envPhpRoot = $_SERVER['ENV_PHPROOT'] ?? getenv('ENV_PHPROOT') ?? dirname(__DIR__);
-$envHostId = $_SERVER['ENV_MYIP'] ?? getenv('ENV_MYIP') ?? 'local';
+// file locations rooted inside the repository so the simulator operates without
+// external /env mounts or shared environment variables.
+$projectRoot = realpath(dirname(__DIR__)) ?: dirname(__DIR__);
+$logRoot = $projectRoot . '/runtime/logs';
+$runRoot = $projectRoot . '/runtime/run';
+$tmpRoot = $projectRoot . '/runtime/tmp';
+$hostId = $_SERVER['SERVER_NAME'] ?? php_uname('n') ?? gethostname() ?? 'local';
 
-define ("LOGROOT", rtrim($envLogRoot, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . $envHostId . DIRECTORY_SEPARATOR . 'hostDaemon');
-define ("RUNROOT", rtrim($envRunRoot, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . $envHostId . DIRECTORY_SEPARATOR . 'hostDaemon');
-define ("TMPROOT", rtrim($envTmpRoot, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . $envHostId . DIRECTORY_SEPARATOR . 'hostDaemon');
+define("LOGROOT", rtrim($logRoot, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . $hostId . DIRECTORY_SEPARATOR . 'hostDaemon');
+define("RUNROOT", rtrim($runRoot, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . $hostId . DIRECTORY_SEPARATOR . 'hostDaemon');
+define("TMPROOT", rtrim($tmpRoot, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . $hostId . DIRECTORY_SEPARATOR . 'hostDaemon');
 if (!defined("PHPROOT")) {
-        $normalisedRoot = rtrim($envPhpRoot, DIRECTORY_SEPARATOR);
-        if ($normalisedRoot === '') {
-                $normalisedRoot = realpath(dirname(__DIR__)) ?: dirname(__DIR__);
-        }
-        define ("PHPROOT", $normalisedRoot);
+        define("PHPROOT", rtrim($projectRoot, DIRECTORY_SEPARATOR));
 }
 
 define ("SIGNAL_DAEMON",0x0);

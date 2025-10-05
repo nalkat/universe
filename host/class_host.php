@@ -238,13 +238,11 @@ class Host
 
 	private function loadModules () : void
 	{
-		//$phproot = ( getenv('ENV_PHPROOT') ?? "/env/scripts/lib");
 		//if (empty($phproot)) die ("it's just fucked");
 		if ($this->debug === true) Utility::ncWrite(__METHOD__ . " Entering function", LOG_DEBUG_INOUT, L_DEBUG);
 ///// this really needs to be rewritten ////	
 		if (!class_exists ("Docker", false))
 		{
-//			if (file_exists($_SERVER['ENV_PHPROOT'] . "/docker/class_docker.php"))
 //			if (file_exists($phproot . "class_docker.php"))
 //				{
 	//			if ($this->debug === true) Utility::ncWrite(__METHOD__ . " Including file: " . $phproot . "/docker/class_docker.php", LOG_DEBUG_HILITE, L_DEBUG);
@@ -331,14 +329,12 @@ class Host
 	private function setContainer () : void
 	{
 		if ($this->debug === true) Utility::ncWrite(__METHOD__ . " Entering function", LOG_DEBUG_INOUT, L_DEBUG);
-		if (isset($_SERVER["ENV_CONTAINER"]))
-		{
-			$this->isContainer = trim($_SERVER["ENV_CONTAINER"]);
-		}
-		if (isset($_SERVER["CONTAINER_APP"]))
-		{
-			$this->containerApplication = trim($_SERVER["CONTAINER_APP"]);
-		}
+                $this->isContainer = false;
+                if (isset($_SERVER["CONTAINER_APP"]))
+                {
+                        $this->containerApplication = trim($_SERVER["CONTAINER_APP"]);
+                        $this->isContainer = ($this->containerApplication !== '');
+                }
 		if ($this->debug === true) Utility::ncWrite(__METHOD__ . " Leaving function", LOG_DEBUG_INOUT, L_DEBUG);
 		return;
 	}

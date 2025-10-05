@@ -2,6 +2,14 @@
 
 class System
 {
+        use MetadataBackedNarrative {
+                addChronicleEntry as private recordChronicleEntry;
+                importChronicle as private metadataImportChronicle;
+                getChronicle as private metadataGetChronicle;
+                setDescription as private metadataSetDescription;
+                getDescription as private metadataGetDescription;
+        }
+
         public const PROPAGATION_ANALYTIC = 'analytic';
         public const PROPAGATION_NUMERICAL = 'numerical';
 
@@ -14,6 +22,8 @@ class System
         private $gravitySofteningLength;
         private $eventLog;
         private $eventLogLimit;
+        private $lastPrimaryMass;
+        protected int $chronicleLimit = 64;
 
         public function __construct (string $name, ?Star $primaryStar = null)
         {
@@ -26,6 +36,8 @@ class System
                 $this->gravitySofteningLength = floatval(0);
                 $this->eventLog = array();
                 $this->eventLogLimit = 100;
+                $this->lastPrimaryMass = null;
+                $this->setDescription('Uncharted system awaiting observational data.');
                 if ($primaryStar instanceof Star)
                 {
                         $this->setPrimaryStar($primaryStar);
@@ -87,6 +99,7 @@ class System
         {
                 $this->primaryStar =& $star;
                 $this->registerObject($star);
+                $this->lastPrimaryMass = $star->getMass();
         }
 
         public function getPrimaryStar () : ?Star
@@ -207,6 +220,7 @@ class System
                 }
                 $this->resolveCollisions($step);
                 $this->age += $step;
+                $this->monitorPrimaryStarMass();
         }
 
         public function snapshotState () : array
@@ -290,12 +304,126 @@ class System
                 );
         }
 
+        public function respondToPrimaryMassShift (float $previousMass, float $currentMass) : array
+        {
+                $this->lastPrimaryMass = $currentMass;
+                return $this->handlePrimaryMassChange($previousMass, $currentMass);
+        }
+
+        private function monitorPrimaryStarMass () : void
+        {
+                if (!($this->primaryStar instanceof Star))
+                {
+                        $this->lastPrimaryMass = null;
+                        return;
+                }
+                $currentMass = $this->primaryStar->getMass();
+                if ($this->lastPrimaryMass === null)
+                {
+                        $this->lastPrimaryMass = $currentMass;
+                        return;
+                }
+                $delta = abs($currentMass - $this->lastPrimaryMass);
+                if ($delta <= 0.0)
+                {
+                        return;
+                }
+                $relative = ($this->lastPrimaryMass > 0.0) ? ($delta / $this->lastPrimaryMass) : 0.0;
+                if ($relative < 1.0E-6)
+                {
+                        return;
+                }
+                $this->handlePrimaryMassChange($this->lastPrimaryMass, $currentMass);
+                $this->lastPrimaryMass = $currentMass;
+        }
+
+        private function handlePrimaryMassChange (float $previousMass, float $currentMass) : array
+        {
+                $ejected = array();
+                $safePrevious = max(0.0, $previousMass);
+                $safeCurrent = max(0.0, $currentMass);
+                $ratio = ($safePrevious > 0.0) ? ($safeCurrent / $safePrevious) : 1.0;
+                $ratio = max(0.0, $ratio);
+                $starName = ($this->primaryStar instanceof Star) ? $this->primaryStar->getName() : 'primary star';
+                $summary = array(
+                        'type' => 'stellar_mass_change',
+                        'timestamp' => $this->age,
+                        'objects' => array($starName),
+                        'energy' => 0.0,
+                        'relative_speed' => 0.0,
+                        'mass_ratio' => $ratio,
+                        'previous_mass' => $safePrevious,
+                        'current_mass' => $safeCurrent
+                );
+                $this->recordEvent($summary);
+                $changePercent = ($safePrevious > 0.0)
+                        ? (100.0 * (1.0 - $ratio))
+                        : 0.0;
+                $direction = ($safeCurrent < $safePrevious) ? 'shed' : 'gained';
+                $text = sprintf(
+                        '%s %s %.2f%% of its mass, upsetting local orbital stability.',
+                        $starName,
+                        $direction,
+                        abs($changePercent)
+                );
+                $this->addChronicleEntry('stellar-mass-change', $text, $this->age, array($starName));
+                if ($ratio <= 0.0)
+                {
+                        return $ejected;
+                }
+                foreach ($this->getPlanets() as $planet)
+                {
+                        if (!($planet instanceof SystemObject))
+                        {
+                                continue;
+                        }
+                        $name = $planet->getName();
+                        $velocity = $planet->getVelocity();
+                        $position = $planet->getPosition();
+                        $distance = sqrt(
+                                ($position['x'] * $position['x']) +
+                                ($position['y'] * $position['y']) +
+                                ($position['z'] * $position['z'])
+                        );
+                        $adjustedVelocity = $velocity;
+                        $velocityScale = sqrt(max($ratio, 1.0E-6));
+                        foreach ($adjustedVelocity as $axis => $component)
+                        {
+                                $adjustedVelocity[$axis] = $component * $velocityScale;
+                        }
+                        $planet->setVelocity($adjustedVelocity);
+                        $planet->addChronicleEntry(
+                                'orbit-adjustment',
+                                sprintf(
+                                        '%s adjusted orbital velocity by factor %.3f after stellar mass change.',
+                                        $name,
+                                        $velocityScale
+                                ),
+                                $this->age,
+                                array($name, $starName)
+                        );
+                        if ($ratio < 0.5 && $distance > 0.0)
+                        {
+                                $removed = $this->removeObject($name);
+                                if ($removed instanceof SystemObject)
+                                {
+                                        $removed->setMetadata('departure_reason', 'stellar mass shedding');
+                                        $removed->setMetadata('departure_time', $this->age);
+                                        $removed->setMetadata('departure_star', $starName);
+                                        $removed->appendDescription('Torn from its orbit after severe stellar mass loss.');
+                                        $ejected[] = $removed;
+                                }
+                        }
+                }
+                return $ejected;
+        }
+
         public function getRecentEvents (?int $limit = null) : array
         {
                 if ($limit === null)
                 {
-                        return $this->eventLog;
-                }
+                return $this->eventLog;
+        }
                 $limit = max(0, intval($limit));
                 if ($limit === 0) return array();
                 return array_slice($this->eventLog, -$limit);
@@ -515,6 +643,49 @@ class System
                 {
                         $this->eventLog = array_slice($this->eventLog, -$this->eventLogLimit);
                 }
+                $summary = isset($event['type']) ? strval($event['type']) : 'event';
+                $participants = array();
+                if (isset($event['objects']) && is_array($event['objects']))
+                {
+                        $participants = $event['objects'];
+                }
+                $objects = empty($participants) ? 'unknown masses' : implode(', ', array_map('strval', $participants));
+                $energy = isset($event['energy']) ? floatval($event['energy']) : 0.0;
+                $speed = isset($event['relative_speed']) ? floatval($event['relative_speed']) : 0.0;
+                $text = sprintf(
+                        '%s event involving %s (energy %.2e J, relative speed %.2f m/s).',
+                        ucfirst($summary),
+                        $objects,
+                        $energy,
+                        $speed
+                );
+                $this->addChronicleEntry($summary, $text, floatval($event['timestamp'] ?? $this->age), $participants);
+        }
+
+        public function setDescription (string $description) : void
+        {
+                $this->metadataSetDescription($description);
+        }
+
+        public function getDescription () : string
+        {
+                return $this->metadataGetDescription();
+        }
+
+        public function addChronicleEntry (string $type, string $text, ?float $timestamp = null, array $participants = array()) : void
+        {
+                $resolvedTimestamp = ($timestamp === null) ? $this->age : floatval($timestamp);
+                $this->recordChronicleEntry($type, $text, $resolvedTimestamp, $participants);
+        }
+
+        public function importChronicle (array $entries) : void
+        {
+                $this->metadataImportChronicle($entries);
+        }
+
+        public function getChronicle (?int $limit = null) : array
+        {
+                return $this->metadataGetChronicle($limit);
         }
 }
 ?>

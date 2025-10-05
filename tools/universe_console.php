@@ -11,6 +11,7 @@ function console_print_usage () : void
         echo "  php tools/universe_console.php hierarchy [--depth=3] [--path=selector] [--include-people=0] [--socket=path] [--json]" . PHP_EOL;
         echo "  php tools/universe_console.php shutdown [--socket=path] [--json]" . PHP_EOL;
         echo "  php tools/universe_console.php repl [--socket=path] [--json]" . PHP_EOL;
+        echo "  php tools/universe_console.php --help" . PHP_EOL;
         echo "  php tools/universe_console.php help" . PHP_EOL;
 }
 
@@ -309,6 +310,12 @@ if (!empty($arguments) && strpos($arguments[0], '--') !== 0)
         $command = strtolower(array_shift($arguments));
 }
 $options = console_parse_options($arguments);
+
+if (array_key_exists('help', $options) || array_key_exists('h', $options))
+{
+        console_print_usage();
+        exit(0);
+}
 
 $socketPath = $options['socket'] ?? (__DIR__ . '/../runtime/universe.sock');
 

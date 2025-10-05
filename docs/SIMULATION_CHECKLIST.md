@@ -4,12 +4,31 @@
 - [x] Define requirements for people viability gating.
 - [ ] Implement dynamic event pipeline for civilizations.
 - [x] Improve the universe simulator executable to orchestrate subobject ticks.
+- [x] Guarantee universal tick cascades advance every galaxy, system, and object regardless of UI focus.
 - [x] Document readiness criteria for population spawning.
 - [x] Introduce a blueprint-driven bootstrapper that wires galaxies, systems, planets, and countries together.
+- [x] Procedurally generate galaxies, stellar systems, and planets with configurable seeds and object-count targets.
+- [x] Lift tick-length clamps so delta experimentation can venture into sub-second or extreme regimes.
 - [x] Model resilience/adaptation loops so populations learn from famine and disasters.
+- [x] Model relative time dilation per planet and ensure local days/years drive citizen hunger and aging.
+- [x] Implement multi-factor planetary habitability analysis and classification to surface colonization priorities.
+- [x] Seed climate-driven weather cycles and narrative descriptions for planets, countries, and citizens.
 - [x] Establish material, chemical, and taxonomy scaffolding for future matter simulations.
 - [x] Flesh out plant, animal, and insect behaviours for ecological modelling.
 - [x] Create settlement and housing infrastructure classes to host emerging populations.
 - [x] Prototype adaptive habitats (nests, burrows, emergent shelters) that can fail, learn, and evolve alongside their builders.
 - [x] Deliver an operator console view to inspect galaxies, systems, planets, and civilizations in real time.
+- [x] Ship a desktop control panel that orchestrates common simulator commands without the console.
+- [ ] Apply a bespoke visual theme and artwork pipeline for the desktop control panel.
 - [ ] Stress-test habitat experimentation loops across multi-season environmental scenarios.
+- [x] Surface biosphere composition summaries and economic telemetry throughout the catalog hierarchy.
+- [x] Parallelize galaxy advancement with a configurable worker pool to leverage multi-core hosts.
+- [x] Stabilize random event sampling so empty catalogs or small populations cannot crash the simulator.
+- [x] Simulate galactic collisions and tidal interactions with recorded chronicles.
+- [x] Track intergalactic and intersystem transit objects, including propulsion and hull metadata.
+- [x] Model stellar mass-loss events that destabilize systems and eject unbound worlds.
+- [x] Move metadata persistence to PostgreSQL with automatic SQLite fallback and ship a zero-I/O in-memory mode to eliminate lore-store contention under heavy load.
+- [x] Prune excess chronicle rows when retention limits are exceeded so catalogs stay responsive after high-volume runs.
+- [x] Surface per-tick dynamics snapshots for systems, stars, and planets so interface layers can animate motion without
+      invoking new simulator passes.
+- [x] Scale initial country populations to keep catalog exports responsive on multi-galaxy seeds.

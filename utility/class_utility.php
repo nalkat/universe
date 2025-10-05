@@ -34,7 +34,7 @@ final class Utility
 		self::$Telemetry =& $GLOBALS['Telemetry'];
 		self::$Telemetry->objects_instantiated++;
 		self::$Telemetry->functions_entered++;
-		self::$domain = $_SERVER['SERVER_NAME'] ?? getenv("ENV_HOSTNAME") ?? getenv("HOSTNAME") ?? "the.observer";
+                self::$domain = $_SERVER['SERVER_NAME'] ?? php_uname('n') ?? gethostname() ?? "the.observer";
 		global $accessLog, $consoleLog, $debugLog, $errorLog;
 		if (($accessLog !== null) && (is_a($accessLog,"Logger"))) {
 			self::$aLog =& $accessLog;
@@ -64,7 +64,7 @@ final class Utility
 	//   do something
 	// }
 	//
-	public static function getopts (string $optStr, array $longOptStr = null) : mixed
+        public static function getopts (string $optStr, ?array $longOptStr = null) : mixed
 	{
 		self::$Telemetry->functions_entered++;
 		self::$Telemetry->functions_left++;
@@ -77,58 +77,21 @@ final class Utility
 	}
 
   function counter () : int {
-		if (!class_exists("db")) require_once "class_db.php";
-		global $domain;
-  	try
-	  {
-		  if (!$db = new db ())
-			{
-			  $GLOBALS['Telemetry']->excptions_thrown++;
-			  throw new Exception ("Unable to connect to the database", 0);
-		  }
-		/*
-	    if (!($escDomain = $db->escapeLiteral($domain))===false)
-			{
-					$db->sqlstr = "INSERT INTO page_hits (domain_id, page_hits) values ((select id from domains where name='". $domain ."'), 1) ON CONFLICT (domain_id) DO UPDATE SET page_hits = page_hits.page_hits + 1 RETURNING page_hits.page_hits;";
-		}
-			else
-			{
-				return (0);
-			}
-		*/
-      if (($escDomain = $db->escapeLiteral($domain)) !== false)
-      {
-        $db->sqlstr = "
-          WITH domain_lookup AS (
-            SELECT id FROM domains WHERE name = {$escDomain}
-          )
-          INSERT INTO page_hits (domain_id, page_hits)
-          SELECT id, 1 FROM domain_lookup
-          ON CONFLICT (domain_id)
-          DO UPDATE SET page_hits = page_hits.page_hits + 1
-          RETURNING page_hits;
-        ";
-      }
-      else
-      {
-  			echo "<p>$domain</p>" . PHP_EOL;
-        return 0;
-      }
-
-  		if (!$db->query())
-  		{
-  			$GLOBALS['Telemetry']->exceptions_thrown++;
-  			throw new Exception ("Unable to query the database (".$db->sqlstr.")",0);
-  		}
-  		return ($db->row()['page_hits']);
-  	}
-  	catch (Exception $e)
-  	{
-  		$GLOBALS['Telemetry']->exceptions_caught++;
-  		$GLOBALS['Telemetry']->exceptions_last_message = $e->getMessage();
-  		$GLOBALS['Telemetry']->exceptions_last_code = $e->getCode();
-  		return ($e->getCode());
-  	}
+                global $domain;
+        try
+          {
+                  // Database tracking has been retired for the standalone simulator
+                  // build. Return a constant to preserve the legacy signature without
+                  // requiring external services.
+                  return 0;
+        }
+        catch (Exception $e)
+        {
+                $GLOBALS['Telemetry']->exceptions_caught++;
+                $GLOBALS['Telemetry']->exceptions_last_message = $e->getMessage();
+                $GLOBALS['Telemetry']->exceptions_last_code = $e->getCode();
+                return ($e->getCode());
+        }
   }
 	public static function isMTU (int $mtu) : bool
 	{
@@ -392,7 +355,7 @@ final class Utility
 		return $t;
 	}
 
-	public static function isLog(Logger $resource = null) : bool
+        public static function isLog(?Logger $resource = null) : bool
 	{
 		self::$Telemetry->functions_entered++;
 		if (is_a($resource, "Logger")) {
@@ -406,7 +369,7 @@ final class Utility
 	}
 
 	// return bytes written if writing to a socket, false on error, or true if successfully written to a log
-	public static function write (string $what = null, int $logLevel = null, int $oFlags = null)
+        public static function write (?string $what = null, ?int $logLevel = null, ?int $oFlags = null)
 	{
 		self::$Telemetry->functions_entered++;
 		try 
@@ -478,7 +441,7 @@ final class Utility
 	}
 
 	// return bytes written if writing to a socket, false on error, or true if successfully written to a log
-	public static function ncWrite (string $what, int $logLevel = null, int $oFlags = null) 
+        public static function ncWrite (string $what, ?int $logLevel = null, ?int $oFlags = null)
 	{
 		self::$Telemetry->functions_entered++;
 		try
@@ -654,7 +617,7 @@ final class Utility
 	}
 
 	// convert a php array into a form that is compatible with postgres tables
-	public static function db_array_convert (array $db_array = null) : string
+        public static function db_array_convert (?array $db_array = null) : string
 	{
 		self::$Telemetry->functions_entered++;
 		if ($db_array === null) {
@@ -701,7 +664,7 @@ final class Utility
 		}
 	}
 
-	public static function extractPatch (string $patch_stream = null) : string
+        public static function extractPatch (?string $patch_stream = null) : string
 	{
 		self::$Telemetry->functions_entered++;
 		if (is_null($patch_stream) || !is_string($patch_stream) || empty($patch_stream))
@@ -745,7 +708,7 @@ final class Utility
 		return $patch;
 	}
 
-	public static function extractPatchSetInfo (string $message_header = null) : array
+        public static function extractPatchSetInfo (?string $message_header = null) : array
 	{
 		self::$Telemetry->functions_entered++;
 		if (is_null($message_header) || !is_string($message_header) || is_numeric($message_header) || empty($message_header))
